@@ -1,0 +1,2 @@
+# opcore
+A white-label bookkeeping and tax-optimization SaaS platform featuring AI-driven expense analysis and dynamic branding
