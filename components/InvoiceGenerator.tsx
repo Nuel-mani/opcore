@@ -1,290 +1,453 @@
-import React, { useState, useEffect } from 'react';
-import { useTenant } from '../context/TenantContext';
-import { Invoice, InvoiceItem } from '../types';
-import { Plus, Download, FileSpreadsheet, Trash2 } from 'lucide-react';
+import React, { useState } from 'react';
+import { useTenant } from '../context/TenantContext'; // Assuming context availability
+import { Plus, Trash2, Printer, FileText, CheckCircle } from 'lucide-react';
 
-const InvoiceGenerator: React.FC = () => {
-  const { tenant, invoices, addInvoice } = useTenant();
-  const [customerName, setCustomerName] = useState('');
-  const [items, setItems] = useState<InvoiceItem[]>([{ description: '', quantity: 1, unitPrice: 0, vatRate: 0 }]);
+export const InvoiceGenerator = () => {
+    const { tenant, addInvoice, invoices, deleteInvoice, updateInvoice } = useTenant();
 
-  // Nigerian VAT Logic: 
-  // 1. Micro businesses (<25m) are Exempt.
-  // 2. Specific goods (Books, Medical, Basic Food) are Zero-rated.
-  const getApplicableVat = (description: string): number => {
-      if (tenant.turnoverBand === 'micro') return 0; // VAT Exempt
-      
-      const zeroRatedKeywords = ['book', 'medical', 'drug', 'pharmacy', 'education', 'vegetable', 'tuber', 'fruit', 'baby'];
-      const isZeroRated = zeroRatedKeywords.some(k => description.toLowerCase().includes(k));
-      
-      return isZeroRated ? 0 : 7.5;
-  };
+    // State
+    const [customerName, setCustomerName] = useState('');
+    const [lineItems, setLineItems] = useState<any[]>([]);
+    const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+    const [editingId, setEditingId] = useState<string | null>(null);
+    const [expandedId, setExpandedId] = useState<string | null>(null);
 
-  const handleAddItem = () => {
-    setItems([...items, { description: '', quantity: 1, unitPrice: 0, vatRate: tenant.turnoverBand === 'micro' ? 0 : 7.5 }]);
-  };
-
-  const removeItem = (index: number) => {
-    setItems(items.filter((_, i) => i !== index));
-  };
-
-  const handleItemChange = (index: number, field: keyof InvoiceItem, value: string | number) => {
-    const newItems = [...items];
-    const updatedItem = { ...newItems[index], [field]: value };
-    
-    // Auto-recalculate VAT if description changes
-    if (field === 'description') {
-        updatedItem.vatRate = getApplicableVat(value as string);
-    }
-
-    newItems[index] = updatedItem;
-    setItems(newItems);
-  };
-
-  const calculateSubtotal = () => items.reduce((acc, item) => acc + (item.quantity * item.unitPrice), 0);
-  const calculateVatTotal = () => items.reduce((acc, item) => acc + (item.quantity * item.unitPrice * ((item.vatRate || 0) / 100)), 0);
-  const calculateGrandTotal = () => calculateSubtotal() + calculateVatTotal();
-
-  const handleCreateInvoice = () => {
-    if (!customerName) return;
-    const newInvoice: Invoice = {
-      id: `INV-${Math.floor(1000 + Math.random() * 9000)}`,
-      customerName,
-      items,
-      totalAmount: calculateGrandTotal(),
-      vatAmount: calculateVatTotal(),
-      status: 'draft',
-      date: new Date().toISOString().split('T')[0]
+    const toggleRow = (id: string) => {
+        if (expandedId === id) {
+            setExpandedId(null);
+        } else {
+            setExpandedId(id);
+        }
     };
-    addInvoice(newInvoice);
-    setCustomerName('');
-    setItems([{ description: '', quantity: 1, unitPrice: 0, vatRate: 0 }]);
-  };
 
-  // Export to CSV (Xero/QuickBooks Standard)
-  const handleExportCSV = () => {
-      const headers = ["*ContactName", "*InvoiceNumber", "*InvoiceDate", "*DueDate", "*Quantity", "*UnitAmount", "*TaxType", "Description", "AccountCode"];
-      const rows = invoices.flatMap(inv => 
-        inv.items.map(item => [
-            inv.customerName,
-            inv.id,
-            inv.date.split('-').reverse().join('/'), // DD/MM/YYYY
-            inv.date.split('-').reverse().join('/'),
-            item.quantity,
-            item.unitPrice,
-            item.vatRate === 0 ? "Tax Exempt (0%)" : "VAT (7.5%)",
-            item.description,
-            "200" // Generic Sales Code
-        ])
-      );
+    const handleEdit = (inv: any) => {
+        setCustomerName(inv.customerName);
+        setDate(inv.date);
+        setEditingId(inv.id);
 
-      const csvContent = "data:text/csv;charset=utf-8," 
-          + [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
-      
-      const encodedUri = encodeURI(csvContent);
-      const link = document.createElement("a");
-      link.setAttribute("href", encodedUri);
-      link.setAttribute("download", `opcore_invoices_export_${new Date().toISOString().split('T')[0]}.csv`);
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-  };
+        // Parse items if string, else use as is
+        let items = [];
+        try {
+            items = typeof inv.items === 'string' ? JSON.parse(inv.items) : inv.items;
+        } catch (e) { items = [] }
+        setLineItems(items);
 
-  return (
-    <div className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-8 animate-fade-in pb-10">
-      
-      {/* Builder Form */}
-      <div className="space-y-6">
-          <div className="flex justify-between items-center">
-            <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Create Invoice</h2>
-            <div className="text-xs font-mono px-2 py-1 bg-gray-100 dark:bg-gray-800 rounded text-gray-500">
-                Mode: {tenant.turnoverBand === 'micro' ? 'VAT Exempt' : 'VAT Active (7.5%)'}
-            </div>
-          </div>
-          
-          <div className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 space-y-4">
-              <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Customer Name</label>
-                  <input 
-                    type="text" 
-                    className="w-full px-4 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white rounded-lg outline-none focus:ring-2 focus:ring-brand"
-                    placeholder="e.g. Dangote Cement Plc"
-                    value={customerName}
-                    onChange={e => setCustomerName(e.target.value)}
-                  />
-              </div>
+        // Scroll to top
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    };
 
-              <div>
-                  <div className="flex justify-between items-center mb-2">
-                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Line Items</label>
-                     <span className="text-xs text-gray-500 italic">VAT auto-calculated based on item type</span>
-                  </div>
-                  {items.map((item, index) => (
-                      <div key={index} className="flex gap-2 mb-2 items-start">
-                          <div className="flex-grow">
-                            <input 
-                                type="text" 
-                                className="w-full px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white rounded-lg outline-none text-sm"
-                                placeholder="Description (e.g. Medical Supplies)"
-                                value={item.description}
-                                onChange={(e) => handleItemChange(index, 'description', e.target.value)}
-                            />
-                            {item.vatRate === 0 && item.description.length > 3 && tenant.turnoverBand !== 'micro' && (
-                                <span className="text-[10px] text-green-600 font-bold ml-1">Zero-Rated Item</span>
-                            )}
-                          </div>
-                          <input 
-                            type="number" 
-                            className="w-16 px-2 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white rounded-lg outline-none text-sm"
-                            placeholder="Qty"
-                            value={item.quantity}
-                            onChange={(e) => handleItemChange(index, 'quantity', parseInt(e.target.value) || 0)}
-                          />
-                          <input 
-                            type="number" 
-                            className="w-24 px-2 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white rounded-lg outline-none text-sm"
-                            placeholder="Price"
-                            value={item.unitPrice}
-                            onChange={(e) => handleItemChange(index, 'unitPrice', parseFloat(e.target.value) || 0)}
-                          />
-                          <button onClick={() => removeItem(index)} className="p-2 text-gray-400 hover:text-red-500">
-                              <Trash2 size={16} />
-                          </button>
-                      </div>
-                  ))}
-                  <button onClick={handleAddItem} className="text-sm text-brand font-medium hover:underline flex items-center gap-1 mt-2">
-                      <Plus size={14} /> Add Line Item
-                  </button>
-              </div>
+    const handleDelete = async (id: string) => {
+        if (confirm('Are you sure you want to delete this invoice?')) {
+            // @ts-ignore
+            if (deleteInvoice) await deleteInvoice(id);
+        }
+    };
 
-              <div className="pt-4 border-t border-gray-100 dark:border-gray-700 flex flex-col items-end gap-1">
-                  <span className="text-sm text-gray-500 dark:text-gray-400">Subtotal: {tenant.currencySymbol}{calculateSubtotal().toLocaleString()}</span>
-                  <span className="text-sm text-gray-500 dark:text-gray-400">VAT (7.5%): {tenant.currencySymbol}{calculateVatTotal().toLocaleString()}</span>
-                  <span className="text-xl font-bold text-gray-800 dark:text-white mt-1">Total: {tenant.currencySymbol}{calculateGrandTotal().toLocaleString()}</span>
-                  
-                  <button 
-                    onClick={handleCreateInvoice}
-                    className="mt-4 w-full bg-brand text-brand-contrast px-6 py-3 rounded-lg font-semibold shadow hover:opacity-90 transition flex justify-center items-center gap-2"
-                  >
-                      <Download size={18} /> Generate Invoice PDF
-                  </button>
-              </div>
-          </div>
+    // ... (rest of component) ...
 
-          {/* Recent Invoices List */}
-          <div>
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-bold text-gray-800 dark:text-white">Recent Invoices</h3>
-                <button 
-                    onClick={handleExportCSV}
-                    className="text-sm flex items-center gap-2 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 px-3 py-1.5 rounded transition"
-                >
-                    <FileSpreadsheet size={14} /> Export CSV (Xero)
-                </button>
-              </div>
-              <div className="space-y-3">
-                  {invoices.length === 0 ? (
-                      <p className="text-gray-500 dark:text-gray-400 text-sm">No invoices generated yet.</p>
-                  ) : (
-                      invoices.map(inv => (
-                        <div key={inv.id} className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 flex justify-between items-center">
-                            <div>
-                                <p className="font-bold dark:text-white">{inv.customerName}</p>
-                                <p className="text-xs text-gray-500 dark:text-gray-400">#{inv.id} • {inv.date}</p>
-                            </div>
-                            <div className="text-right">
-                                <p className="font-bold text-gray-900 dark:text-white">{tenant.currencySymbol}{inv.totalAmount.toLocaleString()}</p>
-                                <span className="text-xs bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 px-2 py-1 rounded capitalize">{inv.status}</span>
-                            </div>
+    // export default InvoiceGenerator;
+
+    // Computed
+    const subtotal = lineItems.reduce((acc, item) => acc + (item.amount * item.qty), 0);
+
+    // VAT Logic: Only if TIER is not 'free' OR turnover > 25m (But for simplicity, check 'Limited' or Pro)
+    // For now, allow toggle if Business
+    // VAT Logic: Apply if turnover is NOT micro (Small, Medium, Large, or Corporate) OR if this single invoice > 25M (Instant graduation)
+    const isVatApplicable = (tenant.accountType === 'business' && ['small', 'medium', 'large', 'corporate'].includes(tenant.turnoverBand || 'micro')) || subtotal >= 25000000;
+    const vatRate = isVatApplicable ? 0.075 : 0;
+    const vatAmount = subtotal * vatRate;
+    const total = subtotal + vatAmount;
+
+    // Handlers
+    const addLineItem = () => {
+        setLineItems([...lineItems, { id: Date.now(), description: '', qty: 1, amount: 0 }]);
+    };
+
+    const removeLineItem = (id: number) => {
+        setLineItems(lineItems.filter(i => i.id !== id));
+    };
+
+    const updateLineItem = (id: number, field: string, value: any) => {
+        setLineItems(lineItems.map(i => i.id === id ? { ...i, [field]: value } : i));
+    };
+
+    // Save & Print
+    const handleSaveAndPrint = async () => {
+        if (!customerName || lineItems.length === 0) {
+            alert("Please add a customer and at least one line item.");
+            return;
+        }
+
+        const invoiceData = {
+            id: editingId || `inv-${Date.now()}`, // Preserve ID if editing
+            customerName,
+            date,
+            items: lineItems, // CORRECT KEYS: 'items' not 'lineItems'
+            totalAmount: total,
+            vatAmount: vatAmount, // Pass calculated VAT
+            status: 'paid',
+            pdfUrl: null,
+            pdfGeneratedAt: new Date().toISOString(), // [NEW] Evidence
+            reprintCount: 0
+        };
+
+        // Persist to DB
+        // @ts-ignore
+        if (addInvoice) await addInvoice(invoiceData);
+
+        // Trigger Print
+        setTimeout(() => window.print(), 500);
+    };
+
+    // Reprint Handler
+    const handleReprint = async (inv: any, e: React.MouseEvent) => {
+        e.stopPropagation(); // Prevent row toggle
+
+        // 1. Update Evidence Logic
+        if (updateInvoice) {
+            await updateInvoice(inv.id, {
+                pdfGeneratedAt: new Date().toISOString(),
+                reprintCount: (inv.reprintCount || 0) + 1
+            });
+        }
+
+        // 2. Load into Preview (Quick & Dirty for MVP)
+        setCustomerName(inv.customerName);
+        setDate(inv.date);
+        let items = [];
+        try { items = typeof inv.items === 'string' ? JSON.parse(inv.items) : inv.items; } catch (e) { items = [] }
+        setLineItems(items);
+
+        // 3. Trigger Print
+        setTimeout(() => window.print(), 500);
+    };
+
+    return (
+        <>
+            <style>{`
+                @media print {
+                    body * { visibility: hidden; }
+                    #invoice-preview, #invoice-preview * { visibility: visible; }
+                    #invoice-preview { 
+                        position: absolute; 
+                        left: 50%; 
+                        top: 20px; 
+                        transform: translateX(-50%);
+                        width: 100%; 
+                        max-width: 800px;
+                        margin: 0; 
+                        padding: 0;
+                        box-shadow: none;
+                    }
+                    /* Hide everything else explicitly */
+                    nav, aside, header, .no-print { display: none !important; }
+                    html, body { height: 100%; overflow: hidden; background: white; }
+                }
+            `}</style>
+            <div className="p-6 max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-8 print:block print:p-0">
+
+                {/* LEFT: Editor (Hidden in Print) */}
+                <div className="bg-white dark:bg-gray-800 rounded-3xl p-8 shadow-sm border border-gray-100 dark:border-gray-700 print:hidden h-fit">
+                    <div className="flex items-center gap-3 mb-8">
+                        <div className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-xl">
+                            <FileText className="text-blue-600 dark:text-blue-400" size={24} />
                         </div>
-                      ))
-                  )}
-              </div>
-          </div>
-      </div>
-
-      {/* Invoice Preview (WYSIWYG) - Paper Simulation */}
-      <div className="bg-gray-200 dark:bg-gray-900/50 p-8 rounded-xl flex items-center justify-center min-h-[600px]">
-          <div className="bg-white w-full max-w-md shadow-2xl p-8 min-h-[500px] flex flex-col justify-between transition-none relative" id="invoice-preview">
-                {/* Watermark for Free Tier */}
-                {tenant.subscriptionTier === 'free' && (
-                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-10 rotate-45">
-                        <span className="text-6xl font-black text-gray-400 uppercase">OpCore Free</span>
-                    </div>
-                )}
-                
-                <div>
-                    <div className="flex justify-between items-start mb-8">
                         <div>
-                            {tenant.logoUrl ? (
-                                <img src={tenant.logoUrl} alt="Logo" className="h-12 w-auto object-contain mb-2" />
-                            ) : (
-                                <h1 className="text-2xl font-bold text-brand">{tenant.businessName}</h1>
-                            )}
-                            <p className="text-xs text-gray-500 mt-1">123 Business Way, Lagos<br/>TIN: {tenant.tinNumber || "N/A"}</p>
+                            <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Create Invoice</h2>
+                            <p className="text-gray-500 text-sm">Manage business transactions compliant with NTA 2025.</p>
                         </div>
-                        <div className="text-right">
-                            <h2 className="text-3xl font-light text-gray-300">INVOICE</h2>
-                            <p className="text-sm text-gray-600 mt-1">Date: {new Date().toLocaleDateString()}</p>
+                        <div className="ml-auto">
+                            {isVatApplicable ?
+                                <span className="inline-flex items-center gap-1 px-3 py-1 bg-green-50 text-green-700 text-xs font-bold rounded-full border border-green-200">
+                                    <CheckCircle size={12} /> VAT LEVIED (7.5%)
+                                </span> :
+                                <span className="inline-flex items-center gap-1 px-3 py-1 bg-gray-100 text-gray-500 text-xs font-bold rounded-full">
+                                    VAT EXEMPT (MICRO)
+                                </span>
+                            }
                         </div>
                     </div>
 
-                    <div className="mb-8">
-                        <p className="text-xs text-gray-400 uppercase tracking-wider mb-1">Bill To</p>
-                        <p className="text-lg font-medium text-gray-900">{customerName || "Customer Name"}</p>
+                    {/* Customer */}
+                    <div className="mb-6">
+                        <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Customer Name</label>
+                        <input
+                            value={customerName}
+                            onChange={e => setCustomerName(e.target.value)}
+                            className="w-full p-3 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50"
+                        />
                     </div>
 
-                    <div className="border-t-2 border-brand pt-4">
-                        <table className="w-full text-sm">
-                            <thead>
-                                <tr className="text-gray-500 border-b border-gray-100">
-                                    <th className="text-left pb-2 font-normal">Description</th>
-                                    <th className="text-center pb-2 font-normal">Qty</th>
-                                    <th className="text-right pb-2 font-normal">Amount</th>
+                    {/* Line Items */}
+                    <div className="mb-6">
+                        <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Line Items</label>
+                        <div className="space-y-3">
+                            {lineItems.map(item => (
+                                <div key={item.id} className="flex gap-2 items-start">
+                                    <input
+                                        placeholder="Description"
+                                        value={item.description}
+                                        onChange={e => updateLineItem(item.id, 'description', e.target.value)}
+                                        className="flex-1 p-3 rounded-xl border border-gray-200 bg-gray-50 text-sm"
+                                    />
+                                    <input
+                                        type="number"
+                                        min="1"
+                                        placeholder="Qty"
+                                        value={item.qty}
+                                        onChange={e => updateLineItem(item.id, 'qty', Number(e.target.value))}
+                                        className="w-16 p-3 rounded-xl border border-gray-200 bg-gray-50 text-sm text-center"
+                                    />
+                                    <input
+                                        type="number"
+                                        placeholder="Amount"
+                                        value={item.amount}
+                                        onChange={e => updateLineItem(item.id, 'amount', Number(e.target.value))}
+                                        className="w-32 p-3 rounded-xl border border-gray-200 bg-gray-50 text-sm text-right"
+                                    />
+                                    <button onClick={() => removeLineItem(item.id)} className="p-3 text-red-400 hover:text-red-600">
+                                        <Trash2 size={18} />
+                                    </button>
+                                </div>
+                            ))}
+                        </div>
+                        <button onClick={addLineItem} className="mt-4 text-sm font-bold text-blue-600 flex items-center gap-1 hover:underline">
+                            <Plus size={16} /> Add Line Item
+                        </button>
+                    </div>
+
+                    {/* Totals Summary (Editor Side) */}
+                    <div className="border-t border-gray-100 pt-6 space-y-2 text-sm">
+                        <div className="flex justify-between text-gray-500">
+                            <span>Subtotal</span>
+                            <span>{tenant.currencySymbol}{subtotal.toLocaleString()}</span>
+                        </div>
+                        <div className="flex justify-between text-gray-500">
+                            <span>VAT (7.5%)</span>
+                            <span>{tenant.currencySymbol}{vatAmount.toLocaleString()}</span>
+                        </div>
+                        <div className="flex justify-between text-xl font-bold text-gray-900 mt-4">
+                            <span>Total Due</span>
+                            <span className="text-blue-600">{tenant.currencySymbol}{total.toLocaleString()}</span>
+                        </div>
+                    </div>
+
+                    <button onClick={handleSaveAndPrint} className="w-full mt-8 py-4 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-lg shadow-blue-500/20 active:scale-[0.98] transition-all flex items-center justify-center gap-2">
+                        <Printer size={20} /> Save & Generate PDF
+                    </button>
+                </div>
+
+                {/* RIGHT: Live Preview (The Paper) */}
+                <div className="bg-gray-200 dark:bg-gray-900/50 p-8 rounded-3xl flex justify-center items-start print:bg-white print:p-0">
+                    <div className="bg-white p-8 md:p-12 w-full max-w-lg shadow-xl shadow-gray-200/50 print:shadow-none min-h-[600px] flex flex-col justify-between" id="invoice-preview">
+
+                        {/* Header */}
+                        <div>
+                            <div className="flex justify-between items-start border-b border-gray-100 pb-8 mb-8">
+                                <div>
+                                    <h1 className="text-2xl font-bold text-blue-600 uppercase tracking-widest mb-1">{tenant.businessName || 'Your Business'}</h1>
+                                    <p className="text-xs text-gray-400 max-w-[150px]">{tenant.businessAddress || '123 Business Rd, Lagos'}</p>
+                                    <p className="text-xs text-gray-400 max-w-[150px]">{tenant.phoneNumber || '+1234568952312'}</p>
+                                    <p className="text-xs text-gray-400">TIN: {tenant.taxIdentityNumber || 'N/A'}</p>
+                                </div>
+
+
+
+                                <div className="text-right">
+                                    <h2 className="text-4xl font-thin text-gray-100 tracking-[0.2em] mb-2">INVOICE</h2>
+                                    <p className="text-xs font-mono text-gray-400">Date: {date}</p>
+                                    <p className="text-xs font-mono text-gray-400">#INV-DRAFT</p>
+                                </div>
+                            </div>
+
+                            {/* Bill To */}
+                            <div className="mb-12 bg-gray-50 p-4 rounded-lg">
+                                <p className="text-[10px] uppercase font-bold text-gray-400 mb-1">BILL TO</p>
+                                <h3 className="text-xl font-bold text-gray-900">{customerName}</h3>
+                            </div>
+
+                            {/* Table */}
+                            <table className="w-full text-sm mb-12">
+                                <thead>
+                                    <tr className="border-b-2 border-blue-100">
+                                        <th className="text-left py-3 text-[10px] text-blue-500 uppercase font-bold tracking-wider">Description</th>
+                                        <th className="text-center py-3 text-[10px] text-blue-500 uppercase font-bold tracking-wider">Qty</th>
+                                        <th className="text-right py-3 text-[10px] text-blue-500 uppercase font-bold tracking-wider">Amount</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-50">
+                                    {lineItems.map(item => (
+                                        <tr key={item.id}>
+                                            <td className="py-4 text-gray-600">{item.description}</td>
+                                            <td className="py-4 text-center text-gray-600">{item.qty}</td>
+                                            <td className="py-4 text-right font-medium text-gray-900">{item.amount.toLocaleString()}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+
+                        {/* Footer Totals */}
+                        <div>
+                            <div className="flex justify-between py-2 text-sm text-gray-500">
+                                <span>Subtotal</span>
+                                <span>{subtotal.toLocaleString()}</span>
+                            </div>
+                            <div className="flex justify-between py-2 text-sm text-gray-500 border-b border-gray-100 pb-4">
+                                <span>VAT ({vatRate * 100}%)</span>
+                                <span>{vatAmount.toLocaleString()}</span>
+                            </div>
+                            <div className="flex justify-between py-4 text-xl font-bold text-gray-900">
+                                <span>TOTAL DUE</span>
+                                <span className="text-blue-600">{total.toLocaleString()}</span>
+                            </div>
+
+                            <div className="mt-8 text-center border-t border-gray-50 pt-8">
+                                <p className="text-[10px] text-gray-300 font-mono">GENERATED BY OPCORE • NTA 2025 COMPLIANT</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            {/* RECENT INVOICES HISTORY (Hidden in Print) */}
+            <div className="mt-12 p-6 max-w-7xl mx-auto print:hidden">
+                <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-6">Recent Invoices</h3>
+
+                {(!invoices || invoices.length === 0) ? (
+                    <div className="bg-white dark:bg-gray-800 rounded-xl p-12 text-center borderBorder-gray-100 dark:border-gray-700">
+                        <div className="w-16 h-16 bg-gray-100 dark:bg-gray-700 rounded-full flex items-center justify-center mx-auto mb-4">
+                            <FileText className="text-gray-400" size={24} />
+                        </div>
+                        <p className="text-gray-500">No invoices generated yet.</p>
+                    </div>
+                ) : (
+                    <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 overflow-hidden shadow-sm overflow-x-auto">
+                        <table className="w-full text-left min-w-[600px]">
+                            <thead className="bg-gray-50 dark:bg-gray-700/50 text-xs uppercase text-gray-500 font-semibold">
+                                <tr>
+                                    <th className="px-6 py-4">Date</th>
+                                    <th className="px-6 py-4">Customer</th>
+                                    <th className="px-6 py-4 text-center">Items</th>
+                                    <th className="px-6 py-4 text-right">Amount</th>
+                                    <th className="px-6 py-4 text-center">Status</th>
+                                    <th className="px-6 py-4"></th>
                                 </tr>
                             </thead>
-                            <tbody className="divide-y divide-gray-50">
-                                {items.map((item, i) => (
-                                    <tr key={i}>
-                                        <td className="py-2 text-gray-800">
-                                            {item.description || "Item description"}
-                                            {item.vatRate === 0 && tenant.turnoverBand !== 'micro' && <span className="text-[10px] ml-1 text-gray-400">(Zero-Rated)</span>}
-                                        </td>
-                                        <td className="py-2 text-center text-gray-600">{item.quantity}</td>
-                                        <td className="py-2 text-right font-medium text-gray-900">
-                                            { (item.quantity * item.unitPrice).toLocaleString(undefined, {minimumFractionDigits: 2}) }
-                                        </td>
-                                    </tr>
-                                ))}
+                            <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
+                                {invoices.slice(0, 10).map((inv: any) => {
+                                    const parsedItems = Array.isArray(inv.items) ? inv.items : JSON.parse(inv.items || '[]');
+                                    const isExpanded = expandedId === inv.id;
+
+                                    return (
+                                        <React.Fragment key={inv.id}>
+                                            <tr
+                                                onClick={() => toggleRow(inv.id)}
+                                                className={`hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors cursor-pointer ${isExpanded ? 'bg-blue-50/50' : ''}`}
+                                            >
+                                                <td className="px-6 py-4 text-sm text-gray-900 dark:text-white font-medium">{inv.date}</td>
+                                                <td className="px-6 py-4 text-sm text-gray-600 dark:text-gray-300">{inv.customerName}</td>
+                                                <td className="px-6 py-4 text-sm text-center text-gray-500">
+                                                    {parsedItems.length}
+                                                </td>
+                                                <td className="px-6 py-4 text-sm text-right font-bold text-gray-900 dark:text-white">
+                                                    {tenant.currencySymbol}{(inv.totalAmount || 0).toLocaleString()}
+                                                </td>
+                                                <td className="px-6 py-4 text-center">
+                                                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold capitalize
+                                            ${inv.status === 'paid' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}
+                                        `}>
+                                                        {inv.status}
+                                                    </span>
+                                                </td>
+                                                <td className="px-6 py-4 text-right flex items-center justify-end gap-3">
+                                                    <button
+                                                        onClick={() => handleEdit(inv)}
+                                                        className="text-gray-500 hover:text-blue-600 transition-colors"
+                                                        title="Edit Invoice"
+                                                    >
+                                                        <FileText size={16} />
+                                                    </button>
+                                                    <button
+                                                        onClick={() => handleDelete(inv.id)}
+                                                        className="text-gray-500 hover:text-red-600 transition-colors"
+                                                        title="Delete Invoice"
+                                                    >
+                                                        <Trash2 size={16} />
+                                                    </button>
+                                                    <button
+                                                        onClick={(e) => handleReprint(inv, e)}
+                                                        className="text-blue-600 hover:text-blue-800 text-xs font-bold flex items-center gap-1 bg-blue-50 px-3 py-1 rounded-full text-nowrap"
+                                                    >
+                                                        <Printer size={14} /> Reprint
+                                                    </button>
+                                                </td>
+                                            </tr>
+                                            {/* EXPANDED DETAILS ROW */}
+                                            {isExpanded && (
+                                                <tr className="bg-gray-50/50 dark:bg-gray-800/50">
+                                                    <td colSpan={6} className="px-6 py-6">
+                                                        <div className="bg-white dark:bg-gray-700 rounded-xl p-6 border border-gray-100 dark:border-gray-600 shadow-sm">
+                                                            <h4 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-4">Invoice Breakdown</h4>
+
+                                                            <table className="w-full text-sm mb-6">
+                                                                <thead className="bg-gray-50 dark:bg-gray-600/50 border-b border-gray-100 dark:border-gray-600">
+                                                                    <tr>
+                                                                        <th className="text-left py-2 px-4 text-gray-500 font-semibold">Description</th>
+                                                                        <th className="text-center py-2 px-4 text-gray-500 font-semibold">Qty</th>
+                                                                        <th className="text-right py-2 px-4 text-gray-500 font-semibold">Amount</th>
+                                                                        <th className="text-right py-2 px-4 text-gray-500 font-semibold">Total</th>
+                                                                    </tr>
+                                                                </thead>
+                                                                <tbody className="divide-y divide-gray-50 dark:divide-gray-600">
+                                                                    {parsedItems.map((item: any) => (
+                                                                        <tr key={item.id}>
+                                                                            <td className="py-3 px-4 text-gray-700 dark:text-gray-300">{item.description}</td>
+                                                                            <td className="py-3 px-4 text-center text-gray-600 dark:text-gray-400">{item.qty}</td>
+                                                                            <td className="py-3 px-4 text-right text-gray-600 dark:text-gray-400">{tenant.currencySymbol}{item.amount.toLocaleString()}</td>
+                                                                            <td className="py-3 px-4 text-right font-medium text-gray-900 dark:text-white">
+                                                                                {tenant.currencySymbol}{(item.amount * item.qty).toLocaleString()}
+                                                                            </td>
+                                                                        </tr>
+                                                                    ))}
+                                                                </tbody>
+                                                            </table>
+
+                                                            <div className="flex justify-end gap-12 text-sm border-t border-gray-100 dark:border-gray-600 pt-4">
+                                                                <div className="text-right">
+                                                                    <p className="text-gray-500 mb-1">Subtotal</p>
+                                                                    <p className="font-bold text-gray-900 dark:text-white">
+                                                                        {tenant.currencySymbol}
+                                                                        {(inv.totalAmount - (inv.vatAmount || 0)).toLocaleString()}
+                                                                    </p>
+                                                                </div>
+                                                                <div className="text-right">
+                                                                    <p className="text-gray-500 mb-1">VAT Paid</p>
+                                                                    <p className="font-bold text-red-600">
+                                                                        {tenant.currencySymbol}{(inv.vatAmount || 0).toLocaleString()}
+                                                                    </p>
+                                                                </div>
+                                                                <div className="text-right bg-blue-50 dark:bg-blue-900/20 px-4 py-2 rounded-lg">
+                                                                    <p className="text-blue-600 mb-1 font-bold">Total Paid</p>
+                                                                    <p className="font-black text-blue-700 dark:text-blue-400 text-lg">
+                                                                        {tenant.currencySymbol}{inv.totalAmount.toLocaleString()}
+                                                                    </p>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                            )}
+                                        </React.Fragment>
+                                    );
+                                })}
                             </tbody>
                         </table>
                     </div>
-                </div>
-
-                <div className="border-t border-gray-200 pt-4 mt-8">
-                    <div className="flex justify-between mb-2 text-sm text-gray-600">
-                        <span>Subtotal</span>
-                        <span>{tenant.currencySymbol}{calculateSubtotal().toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
-                    </div>
-                    <div className="flex justify-between mb-4 text-sm text-gray-600">
-                        <span>VAT ({tenant.turnoverBand === 'micro' ? 'Exempt' : '7.5%'})</span>
-                        <span>{tenant.currencySymbol}{calculateVatTotal().toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
-                    </div>
-                    <div className="flex justify-between items-center border-t border-dashed border-gray-300 pt-2">
-                        <span className="font-bold text-gray-900 uppercase">Total Due</span>
-                        <p className="text-3xl font-bold text-brand">{tenant.currencySymbol}{calculateGrandTotal().toLocaleString(undefined, {minimumFractionDigits: 2})}</p>
-                    </div>
-                    
-                    <div className="mt-8 text-center text-[10px] text-gray-400">
-                        Thank you for your business. Please make payment within 30 days.
-                        <br/>Generated by OpCore
-                    </div>
-                </div>
-          </div>
-      </div>
-
-    </div>
-  );
+                )}
+            </div>
+        </>
+    );
 };
 
 export default InvoiceGenerator;

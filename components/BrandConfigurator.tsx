@@ -1,198 +1,205 @@
-
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useTenant } from '../context/TenantContext';
-import { Upload, Save, CheckCircle } from 'lucide-react';
+import { Save, Upload, Layout, CheckCircle, RefreshCw } from 'lucide-react';
 
-const BrandConfigurator: React.FC = () => {
-    const { tenant, updateTenant } = useTenant();
-    const [localName, setLocalName] = useState(tenant.businessName);
-    const [localTaxId, setLocalTaxId] = useState(tenant.taxIdentityNumber || '');
-    const [localColor, setLocalColor] = useState(tenant.brandColor);
-    const [isSaved, setIsSaved] = useState(false);
+export const BrandConfigurator: React.FC = () => {
+    const { tenant, updateTenant, isSyncing } = useTenant();
 
-    const handleSave = () => {
-        updateTenant({
-            businessName: localName,
-            taxIdentityNumber: localTaxId,
-            brandColor: localColor,
+    // Local State for Form (Wait for Save)
+    const [businessName, setBusinessName] = useState(tenant.businessName);
+    const [taxId, setTaxId] = useState(tenant.taxIdentityNumber || '');
+    const [color, setColor] = useState(tenant.brandColor || '#2252c9');
+    const [logo, setLogo] = useState<string | null>(tenant.logoUrl);
+    const [businessAddress, setBusinessAddress] = useState(tenant.businessAddress || '');
+    const [phoneNumber, setPhoneNumber] = useState(tenant.phoneNumber || '');
+
+
+    // Mock Preview Data
+    const PREVIEW_INVOICE_TOTAL = "₦2,650.00";
+
+    const handleSave = async () => {
+        await updateTenant({
+            businessName,
+            taxIdentityNumber: taxId,
+            brandColor: color,
+            themeColor: color, // Sync Theme
+            logoUrl: logo,
+            businessAddress,
+            phoneNumber
+
         });
-        setIsSaved(true);
-        setTimeout(() => setIsSaved(false), 2000);
-    };
-
-    const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
-        if (file) {
-            const reader = new FileReader();
-            reader.onloadend = () => {
-                updateTenant({ logoUrl: reader.result as string });
-            };
-            reader.readAsDataURL(file);
-        }
+        // Feedback toast or animation could go here
     };
 
     return (
-        <div className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-8 animate-fade-in">
-            <div className="space-y-6">
-                <div>
-                    <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">Brand Studio</h2>
-                    <p className="text-gray-500 dark:text-gray-400">Customize the look and feel of your white-label dashboard and invoices. Changes apply globally.</p>
+        <div className="p-6 max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-8">
+
+            {/* LEFT: Configuration Panel */}
+            <div className="bg-white dark:bg-gray-800 rounded-3xl p-8 shadow-sm border border-gray-100 dark:border-gray-700">
+                <div className="flex items-center gap-3 mb-8">
+                    <div className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-xl">
+                        <Layout className="text-blue-600 dark:text-blue-400" size={24} />
+                    </div>
+                    <div>
+                        <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Brand Studio</h2>
+                        <p className="text-gray-500 text-sm">Customize your white-label identity.</p>
+                    </div>
                 </div>
 
-                <div className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 space-y-6">
-
+                <div className="space-y-6">
                     {/* Business Name */}
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Business Name</label>
+                        <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Business Name</label>
                         <input
                             type="text"
-                            value={localName}
-                            onChange={(e) => setLocalName(e.target.value)}
-                            className="w-full px-4 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white rounded-lg focus:ring-2 focus:ring-brand focus:border-transparent outline-none transition"
+                            value={businessName}
+                            onChange={e => setBusinessName(e.target.value)}
+                            placeholder="OpCore LLC"
+                            className="w-full p-3 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50 focus:ring-2 focus:ring-blue-500 outline-none transition-all"
                         />
                     </div>
 
-                    {/* Unified Tax ID */}
+                    {/* Business Address */}
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                            Unified Tax ID <span className="text-xs text-gray-400 font-normal">(NIN / RC / BN)</span>
-                        </label>
-                        <div className="relative">
-                            <input
-                                type="text"
-                                value={localTaxId}
-                                onChange={(e) => setLocalTaxId(e.target.value)}
-                                placeholder="e.g. RC-123456789" // Placeholder example
-                                className="w-full px-4 py-2 pl-4 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white rounded-lg focus:ring-2 focus:ring-brand focus:border-transparent outline-none transition font-mono"
-                            />
-                        </div>
-                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Required for NTA 2025 Compliance.</p>
+                        <label className="block text-xs font-bold text-gray-500 uppercase mb-2">Business Address</label>
+                        <input
+                            type="text"
+                            value={businessAddress}
+                            onChange={(e) => setBusinessAddress(e.target.value)}
+                            placeholder="123 Innovation Dr, Lagos"
+                            className="w-full px-4 py-3 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 outline-none transition text-gray-900 dark:text-white"
+                        />
+                    </div>
+
+                    {/* Phone Number */}
+                    <div>
+                        <label className="block text-xs font-bold text-gray-500 uppercase mb-2">Phone Number</label>
+                        <input
+                            type="text"
+                            value={phoneNumber}
+                            onChange={(e) => setPhoneNumber(e.target.value)}
+                            placeholder="+234 800 000 0000"
+                            className="w-full px-4 py-3 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 outline-none transition text-gray-900 dark:text-white"
+                        />
+                        <p className="text-[10px] text-gray-400 mt-1">This will appear on your invoices.</p>
+                    </div>
+
+                    {/* Tax ID */}
+                    <div>
+                        <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Unified Tax ID (NIN / RC)</label>
+                        <input
+                            type="text"
+                            value={taxId}
+                            onChange={e => setTaxId(e.target.value)}
+                            placeholder="e.g. RC-12345678"
+                            className="w-full p-3 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50 focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+                        />
+                        <p className="text-xs text-gray-400 mt-2">Required for NTA 2025 Compliance.</p>
                     </div>
 
                     {/* Brand Color */}
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Primary Brand Color</label>
-                        <div className="flex items-center gap-3">
-                            <input
-                                type="color"
-                                value={localColor}
-                                onChange={(e) => setLocalColor(e.target.value)}
-                                className="h-12 w-20 p-1 bg-white dark:bg-gray-700 rounded border border-gray-300 dark:border-gray-600 cursor-pointer"
-                            />
-                            <div className="flex-1">
-                                <span className="text-gray-500 dark:text-gray-400 font-mono bg-gray-100 dark:bg-gray-700 px-3 py-1 rounded">{localColor}</span>
-                                <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">This color will be used for buttons, highlights, and headers.</p>
+                        <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">Primary Brand Color</label>
+                        <div className="flex items-center gap-4">
+                            <div className="relative w-16 h-16 rounded-2xl shadow-sm border border-gray-100 overflow-hidden" style={{ backgroundColor: color }}>
+                                <input
+                                    type="color"
+                                    value={color}
+                                    onChange={(e) => setColor(e.target.value)}
+                                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                                />
                             </div>
+                            <input
+                                type="text"
+                                value={color}
+                                onChange={e => setColor(e.target.value)} // Add Hex validation later
+                                className="uppercase font-mono p-3 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50 w-32 text-center"
+                            />
+                            <p className="text-xs text-gray-500 max-w-[150px]">Used for buttons, highlights, and headers.</p>
                         </div>
                     </div>
 
-                    {/* Logo Upload */}
+                    {/* Logo Mockup */}
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Logo</label>
-                        <div className="mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-gray-300 dark:border-gray-600 border-dashed rounded-lg hover:border-brand transition-colors group">
-                            <div className="space-y-1 text-center">
-                                {tenant.logoUrl ? (
-                                    <img src={tenant.logoUrl} alt="Preview" className="mx-auto h-24 object-contain mb-4" />
-                                ) : (
-                                    <Upload className="mx-auto h-12 w-12 text-gray-400 dark:text-gray-500 group-hover:text-brand" />
-                                )}
-                                <div className="flex text-sm text-gray-600 dark:text-gray-400 justify-center">
-                                    <label className="relative cursor-pointer bg-white dark:bg-gray-800 rounded-md font-medium text-brand hover:text-blue-500 focus-within:outline-none">
-                                        <span>Upload a file</span>
-                                        <input type="file" accept="image/*" className="sr-only" onChange={handleLogoUpload} />
-                                    </label>
-                                </div>
-                                <p className="text-xs text-gray-500 dark:text-gray-500">PNG, JPG up to 2MB</p>
+                        <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Logo</label>
+                        <div className="border-2 border-dashed border-gray-200 dark:border-gray-600 rounded-2xl p-8 flex flex-col items-center justify-center text-center hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors cursor-pointer group">
+                            <div className="p-4 bg-blue-50 text-blue-600 rounded-full mb-3 group-hover:scale-110 transition-transform">
+                                <Upload size={24} />
                             </div>
+                            <span className="font-semibold text-blue-600">Click to upload</span>
+                            <span className="text-xs text-gray-400 mt-1">PNG, JPG up to 2MB</span>
                         </div>
                     </div>
 
                     <button
                         onClick={handleSave}
-                        className="w-full flex items-center justify-center gap-2 bg-brand text-brand-contrast py-3 rounded-lg font-semibold shadow-lg hover:opacity-90 transition-all transform active:scale-95"
+                        disabled={isSyncing}
+                        className="w-full py-4 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-lg shadow-blue-600/20 active:scale-[0.98] transition-all flex items-center justify-center gap-2"
+                        style={{ backgroundColor: color }} // Dynamic Brand Color Preview
                     >
-                        {isSaved ? <CheckCircle size={20} /> : <Save size={20} />}
-                        {isSaved ? "Saved Successfully" : "Save Changes"}
+                        {isSyncing ? <RefreshCw className="animate-spin" /> : <Save size={20} />}
+                        Save Changes
                     </button>
                 </div>
             </div>
 
-            {/* Live Preview */}
-            <div className="space-y-6">
-                <div className="flex items-center justify-between">
-                    <h3 className="text-lg font-semibold text-gray-700 dark:text-gray-300">Live Preview</h3>
-                    <span className="text-xs text-gray-400 uppercase tracking-widest">Client View</span>
+            {/* RIGHT: Live Preview */}
+            <div>
+                <div className="flex items-center justify-between mb-6">
+                    <h3 className="text-lg font-bold text-gray-500 uppercase tracking-wider">Live Preview</h3>
+                    <span className="text-xs px-2 py-1 bg-gray-100 rounded text-gray-500">CLIENT VIEW</span>
                 </div>
 
-                {/* Mock Dashboard Card */}
-                <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-100 dark:border-gray-700 overflow-hidden relative">
-                    <div className="h-2 bg-brand w-full"></div>
-                    <div className="p-6">
-                        <div className="flex items-center justify-between mb-6">
-                            {tenant.logoUrl ? (
-                                <img src={tenant.logoUrl} alt="Logo" className="h-8 w-auto object-contain" />
-                            ) : (
-                                <span className="text-xl font-bold text-brand">{localName || tenant.businessName}</span>
-                            )}
-                            <div className="h-8 w-8 rounded-full bg-gray-200 dark:bg-gray-600"></div>
-                        </div>
+                <div className="bg-gray-100 dark:bg-gray-900/50 p-8 rounded-3xl border border-gray-200/50 dark:border-gray-800">
 
-                        <div className="grid grid-cols-2 gap-4 mb-6">
-                            <div className="bg-gray-50 dark:bg-gray-700 p-4 rounded-lg">
-                                <p className="text-xs text-gray-500 dark:text-gray-400">Net Profit</p>
-                                <p className="text-2xl font-bold text-gray-900 dark:text-white">$12,450</p>
+                    {/* Mock Invoice Card */}
+                    <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm p-6 mb-6 relative overflow-hidden">
+                        <div className="flex justify-between items-start mb-8">
+                            <div>
+                                <h4 className="font-bold text-xl text-brand" style={{ color: color }}>{businessName || 'Your Business'}</h4>
+                                <p className="text-xs text-gray-400 mt-1">123 Business Rd, Tech City</p>
                             </div>
-                            <div className="bg-gray-50 dark:bg-gray-700 p-4 rounded-lg">
-                                <p className="text-xs text-gray-500 dark:text-gray-400">Expenses</p>
-                                <p className="text-2xl font-bold text-gray-900 dark:text-white">$3,200</p>
+                            <div className="text-right">
+                                <span className={`inline-block px-2 py-1 rounded text-[10px] font-bold uppercase ${tenant.subscriptionTier === 'free' ? 'bg-gray-100 text-gray-500' : 'bg-green-100 text-green-600'}`}>
+                                    {tenant.subscriptionTier === 'free' ? 'Free Plan' : 'Pro Plan'}
+                                </span>
+                                <h1 className="text-3xl font-light text-gray-200 mt-2 tracking-widest">INVOICE</h1>
+                                <p className="text-xs font-mono text-gray-400">#INV-001</p>
                             </div>
                         </div>
 
-                        <div className="flex gap-3">
-                            <button className="flex-1 bg-brand text-brand-contrast py-2 rounded-lg text-sm font-medium">Add Invoice</button>
-                            <button className="flex-1 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 text-gray-700 dark:text-gray-200 py-2 rounded-lg text-sm font-medium">Reports</button>
+                        <div className="space-y-4 mb-8">
+                            <div className="flex justify-between text-sm py-2 border-b border-gray-50">
+                                <span className="text-gray-600">Web Development Services</span>
+                                <span className="font-medium">₦2,500.00</span>
+                            </div>
+                            <div className="flex justify-between text-sm py-2 border-b border-gray-50">
+                                <span className="text-gray-600">Hosting Setup</span>
+                                <span className="font-medium">₦150.00</span>
+                            </div>
+                        </div>
+
+                        <div className="flex justify-between items-end">
+                            <span className="font-bold text-gray-900">Total</span>
+                            <span className="text-2xl font-bold" style={{ color: color }}>{PREVIEW_INVOICE_TOTAL}</span>
                         </div>
                     </div>
-                </div>
 
-                {/* Mock Invoice Preview */}
-                <div className="bg-white rounded-xl shadow-lg border border-gray-100 p-8 relative">
-                    <div className="absolute top-0 right-0 m-4 px-2 py-1 bg-green-100 text-green-700 text-xs font-bold rounded">PAID</div>
-                    <div className="flex justify-between items-start mb-8">
+                    {/* Mock Dashboard Card */}
+                    <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm p-6 flex items-center justify-between">
                         <div>
-                            {tenant.logoUrl ? (
-                                <img src={tenant.logoUrl} alt="Logo" className="h-10 w-auto object-contain mb-2" />
-                            ) : (
-                                <h2 className="text-2xl font-bold text-brand mb-2">{localName || tenant.businessName}</h2>
-                            )}
-                            <p className="text-xs text-gray-500">123 Business Rd, Tech City</p>
+                            <p className="text-xs text-gray-400 uppercase font-bold mb-1">Net Profit</p>
+                            <p className="text-2xl font-bold text-gray-900">₦12,450</p>
                         </div>
-                        <div className="text-right">
-                            <p className="text-2xl font-light text-gray-400">INVOICE</p>
-                            <p className="font-mono text-sm">#INV-001</p>
-                        </div>
+                        <button className="px-4 py-2 rounded-lg text-sm font-medium text-white transition-opacity hover:opacity-90" style={{ backgroundColor: color }}>
+                            Add Invoice
+                        </button>
                     </div>
 
-                    <div className="border-t-2 border-brand pt-4 mb-4">
-                        <div className="flex justify-between text-sm mb-2 text-gray-900">
-                            <span>Web Development Services</span>
-                            <span className="font-bold">$2,500.00</span>
-                        </div>
-                        <div className="flex justify-between text-sm text-gray-500">
-                            <span>Hosting Setup</span>
-                            <span>$150.00</span>
-                        </div>
-                    </div>
-
-                    <div className="flex justify-between items-center pt-4 border-t border-gray-100">
-                        <span className="font-bold text-gray-900">Total</span>
-                        <span className="text-xl font-bold text-brand">$2,650.00</span>
-                    </div>
                 </div>
-
             </div>
         </div>
     );
 };
 
-export default BrandConfigurator;
+// export default BrandConfigurator;

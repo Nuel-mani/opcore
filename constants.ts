@@ -2,19 +2,20 @@
 import { TaxRule, Tenant, Transaction, Budget } from './types';
 
 export const INITIAL_TENANT: Tenant = {
-  id: 'tenant-ng-001',
-  businessName: 'Lagos Ventures Ltd',
+  id: '',
+  businessName: '',
   countryCode: 'NG',
   currencySymbol: '₦',
-  brandColor: '#ea580c', // Orange from screenshot
+  brandColor: '#2252c9',
+  themeColor: '#2252c9', // Default Theme
   logoUrl: null,
-  subscriptionTier: 'pro',
+  subscriptionTier: 'free',
   turnoverBand: 'micro',
-  tinNumber: '234-567-890',
-  taxIdentityNumber: 'RC-1234567890123', // Placeholder for Unified Tax ID
+  tinNumber: '',
+  taxIdentityNumber: '',
   sector: 'services',
-  accountType: 'business', // Added to satisfy Tenant interface
-  businessStructure: 'limited', // Default mock structure
+  accountType: 'personal',
+  businessStructure: 'sole_prop',
   rentReceiptUploaded: false,
   rentReceiptUrl: null
 };

@@ -1,8 +1,7 @@
 import React, { useState, useCallback } from 'react';
-import { createWorker } from 'tesseract.js';
+import { ReceiptScanner as ReceiptScannerUtil } from '../utils/ReceiptScanner';
 import { Camera, Upload, X, Check, Loader2, AlertCircle, FileText } from 'lucide-react';
 import { useTenant } from '../context/TenantContext';
-import { parseReceiptText } from '../utils/receiptParser';
 import { Transaction } from '../types';
 
 interface ReceiptScannerProps {
@@ -31,43 +30,41 @@ const ReceiptScanner: React.FC<ReceiptScannerProps> = ({ isOpen, onClose, onSave
         category: 'general_admin',
         isDeductible: true,
         type: 'debit' as 'debit' | 'credit',
+        vatAmount: '',
     });
 
     const processImage = async (file: File) => {
         setStep('processing');
-        setStatusText('Initializing OCR Engine...');
-        setProgress(10);
+        setStatusText('Analyzing Receipt Structure...');
+        setProgress(20);
 
         try {
-            const worker = await createWorker();
+            // 1. OCR (Simulated Edge AI)
+            const imageUrl = URL.createObjectURL(file);
+            setStatusText('Extracting Text...');
+            const text = await ReceiptScannerUtil.performOCR(imageUrl);
+            setProgress(60);
 
-            setStatusText('Recognizing Text...');
-            setProgress(40);
+            // 2. Intelligence (Hybrid Bank/POS Parsing)
+            setStatusText('Applying Tax Compliance Logic...');
+            const extracted = ReceiptScannerUtil.parseReceiptText(text);
+            setProgress(100);
 
-            const { data: { text } } = await worker.recognize(file);
-            /* // logger not supported in v6 createWorker? verify docs if needed. 
-               // For now assume simple recognize works. 
-            */
-
-            setProgress(90);
-            setStatusText('Parsing Data...');
-
-            const extracted = parseReceiptText(text);
-
+            // 3. Map to Form
             setFormData({
                 amount: extracted.amount ? extracted.amount.toString() : '',
                 date: extracted.date || new Date().toISOString().split('T')[0],
-                time: extracted.time || '',
-                description: extracted.narration,
+                time: '', // extracted.date might include time in future
+                description: extracted.description || '',
                 refId: extracted.refId || '',
-                sender: extracted.sender || '',
-                receiver: extracted.receiver || '',
-                category: 'general_admin', // Default
-                isDeductible: true,
-                type: extracted.type || 'debit',
+                sender: '', // Handled in description or payee
+                receiver: extracted.vendorName || '', // Payee
+                category: extracted.isRent ? 'office_rent' : 'general_admin',
+                isDeductible: extracted.hasVatEvidence ?? true,
+                type: extracted.type === 'income' ? 'credit' : 'debit',
+                vatAmount: extracted.vatAmount ? extracted.vatAmount.toString() : '', // Capture VAT
             });
 
-            await worker.terminate();
             setStep('review');
         } catch (err) {
             console.error(err);
@@ -122,23 +119,26 @@ const ReceiptScanner: React.FC<ReceiptScannerProps> = ({ isOpen, onClose, onSave
 
         onSave({
             amount: parseFloat(formData.amount),
-            date: finalDate,
+            date: finalDate.toISOString(),
             description: formData.description,
             // @ts-ignore - simplified category mapping for now
             categoryName: formData.category,
             categoryId: formData.category,
             isDeductible: formData.isDeductible,
-            type: formData.type,
+            type: formData.type === 'debit' ? 'expense' : 'income',
             refId: formData.refId,
             payee: formData.receiver || formData.sender, // Map to payee
-            receiptImageUrl: imagePreview, // In real app, upload this to storage returns URL
+            receiptUrls: [imagePreview], // In real app, upload this to storage returns URL
+            // @ts-ignore
+            vatAmount: parseFloat(formData.vatAmount || '0'),
+            hasVatEvidence: !!formData.vatAmount || formData.isDeductible, // Logic: If we found VAT amount, we have evidence
         });
         onClose();
         // Reset
         setStep('upload');
         setImageFile(null);
         setImagePreview('');
-        setFormData({ amount: '', date: '', time: '', description: '', refId: '', sender: '', receiver: '', category: 'general_admin', isDeductible: true, type: 'debit' });
+        setFormData({ amount: '', date: '', time: '', description: '', refId: '', sender: '', receiver: '', category: 'general_admin', isDeductible: true, type: 'debit', vatAmount: '' });
     };
 
     if (!isOpen) return null;
@@ -288,9 +288,9 @@ const ReceiptScanner: React.FC<ReceiptScannerProps> = ({ isOpen, onClose, onSave
                             </div>
 
                             {/* Tax Cat (Only for Debits usually, but kept generally available) */}
-                            <div className="p-4 bg-orange-50 dark:bg-gray-700/50 rounded-lg border border-orange-100 dark:border-gray-600">
+                            <div className="p-4 rounded-lg border dark:bg-gray-700/50" style={{ backgroundColor: `${tenant.themeColor}10`, borderColor: `${tenant.themeColor}33` }}>
                                 <h4 className="font-bold text-gray-800 dark:text-white mb-3 text-sm flex items-center gap-2">
-                                    <AlertCircle size={14} className="text-orange-500" /> Tax Categorization
+                                    <AlertCircle size={14} style={{ color: tenant.themeColor }} /> Tax Categorization
                                 </h4>
 
                                 <div className="space-y-3">
