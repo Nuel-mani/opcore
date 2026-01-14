@@ -19,11 +19,14 @@ export interface Tenant {
   // Business Specific
   tinNumber?: string;
   brandColor: string;
+  themeColor?: string; // Mapped from brandColor for UI
   logoUrl: string | null;
   turnoverBand: TurnoverBand;
   sector: Sector;
   businessStructure?: BusinessStructure;
   taxIdentityNumber?: string; // New Unified Tax ID (NIN/CAC linked)
+  businessAddress?: string; // Physical Business Address
+  phoneNumber?: string; // Contact Phone
   totalAssets?: number; // For Large Company Classification (>250m)
 
   // Personal Specific
@@ -35,6 +38,10 @@ export interface Tenant {
   pensionContribution?: number; // Voluntary + Statutory
   annualIncome?: number;
   isTaxExempt?: boolean; // For <800k income
+  stampUrl?: string | null;
+  invoiceTemplate?: string;
+  invoiceFont?: string;
+  showWatermark?: boolean;
 }
 
 export interface TaxRule {
@@ -63,7 +70,8 @@ export interface Transaction {
   payee?: string; // Customer or Vendor Name
   paymentMethod?: string; // Bank Transfer, Cash, Card
   refId?: string; // Authorization ID or Invoice #
-  receiptImageUrl?: string;
+  receiptUrls?: string[];
+  vatAmount?: number;
 
   // NTA 2025 Compliance Flags
   isDeductible?: boolean;
@@ -75,6 +83,7 @@ export interface Transaction {
   deductionTip?: string;
   isCapitalAsset?: boolean; // Tier 3 check
   assetClass?: AssetClass;
+  invoiceId?: string; // Link to Invoice for Income Verification
   syncStatus?: 'synced' | 'pending';
 }
 
@@ -85,21 +94,30 @@ export interface Budget {
   type: 'income' | 'expense';
 }
 
-export type InvoiceStatus = 'draft' | 'sent' | 'paid';
+export type InvoiceStatus = 'draft' | 'sent' | 'paid' | 'pending';
 
 export interface InvoiceItem {
   description: string;
   quantity: number;
   unitPrice: number;
-  vatRate?: number; // 0 or 7.5
+  syncStatus: 'pending' | 'synced' | 'failed';
+  appSyncStatus?: string;
 }
 
 export interface Invoice {
   id: string;
+  serialId?: number;
+  tenantId?: string;
   customerName: string;
-  items: InvoiceItem[];
+  items: InvoiceItem[] | string; // JSON string or object
   totalAmount: number;
-  vatAmount: number;
-  status: InvoiceStatus;
-  date: string;
+  vatAmount?: number;
+  status: 'paid' | 'pending' | 'overdue' | 'draft';
+  date: string; // ISO String
+  pdfGeneratedAt?: Date | null; // Timestamp when PDF/Reprint occurred
+  reprintCount?: number;
+  syncStatus?: string;
+  appSyncStatus?: string;
+  dueDate?: string;
+  pdfUrl?: string | null;
 }

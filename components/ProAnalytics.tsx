@@ -1,337 +1,385 @@
-
-import React from 'react';
+import React, { useMemo } from 'react';
 import { useTenant } from '../context/TenantContext';
-import { TrendingUp, AlertCircle, Lock } from 'lucide-react';
+import { TrendingUp, TrendingDown, PiggyBank, ArrowRight, Brain, PieChart, Printer } from 'lucide-react';
 
-const ProAnalytics: React.FC = () => {
-    const { tenant, transactions, budgets } = useTenant();
+export const ProAnalytics: React.FC = () => {
+    const { tenant, transactions, isFeatureLocked, startingBalance } = useTenant() as any;
+    const isLocked = isFeatureLocked('advanced_ledger');
 
-    if (tenant.subscriptionTier === 'free') {
+    // --- Real-Time MoM Logic ---
+    const now = new Date();
+    const currentMonth = now.getMonth();
+    const currentYear = now.getFullYear();
+    const lastMonth = currentMonth === 0 ? 11 : currentMonth - 1;
+    const lastMonthYear = currentMonth === 0 ? currentYear - 1 : currentYear;
+
+    const isThisMonth = (d: Date) => d.getMonth() === currentMonth && d.getFullYear() === currentYear;
+    const isLastMonth = (d: Date) => d.getMonth() === lastMonth && d.getFullYear() === lastMonthYear;
+
+    // --- Calculations ---
+    const totalIncome = transactions
+        .filter((t: any) => t.type === 'income' && isThisMonth(new Date(t.date)))
+        .reduce((acc: number, t: any) => acc + t.amount, 0);
+
+    const totalExpense = transactions
+        .filter((t: any) => t.type === 'expense' && isThisMonth(new Date(t.date)))
+        .reduce((acc: number, t: any) => acc + t.amount, 0);
+
+    const lastMonthIncome = transactions
+        .filter((t: any) => t.type === 'income' && isLastMonth(new Date(t.date)))
+        .reduce((acc: number, t: any) => acc + t.amount, 0);
+
+    const lastMonthExpense = transactions
+        .filter((t: any) => t.type === 'expense' && isLastMonth(new Date(t.date)))
+        .reduce((acc: number, t: any) => acc + t.amount, 0);
+
+    const endBalance = startingBalance + totalIncome - totalExpense; // Should really be cumulative, but for Monthly View: this is Net Flow
+    const savings = totalIncome - totalExpense;
+    const savingsRate = totalIncome > 0 ? (savings / totalIncome) * 100 : 0;
+
+    // --- Aggregations for Tables (vs Last Month) ---
+    const incomeCategories = useMemo(() => {
+        const cats: Record<string, { current: number, last: number }> = {};
+
+        transactions.filter((t: any) => t.type === 'income').forEach((t: any) => {
+            const d = new Date(t.date);
+            const key = t.categoryName || 'Other';
+            if (!cats[key]) cats[key] = { current: 0, last: 0 };
+
+            if (isThisMonth(d)) cats[key].current += t.amount;
+            if (isLastMonth(d)) cats[key].last += t.amount;
+        });
+
+        return Object.entries(cats)
+            .filter(([_, data]) => data.current > 0 || data.last > 0) // Hide empty
+            .map(([name, data]) => ({
+                name,
+                actual: data.current,
+                planned: data.last, // Reusing 'planned' field name for 'Last Month' to minimize UI rework or rename it? Better rename.
+                comparisonLabel: 'vs Last Month',
+                diff: data.current - data.last
+            })).sort((a, b) => b.actual - a.actual);
+    }, [transactions]);
+
+    const expenseCategories = useMemo(() => {
+        const cats: Record<string, { current: number, last: number }> = {};
+
+        transactions.filter((t: any) => t.type === 'expense').forEach((t: any) => {
+            const d = new Date(t.date);
+            const key = t.categoryName || 'Other';
+            if (!cats[key]) cats[key] = { current: 0, last: 0 };
+
+            if (isThisMonth(d)) cats[key].current += t.amount;
+            if (isLastMonth(d)) cats[key].last += t.amount;
+        });
+
+        return Object.entries(cats)
+            .filter(([_, data]) => data.current > 0 || data.last > 0)
+            .map(([name, data]) => ({
+                name,
+                actual: data.current,
+                planned: data.last,
+                comparisonLabel: 'vs Last Month',
+                diff: data.current - data.last
+            })).sort((a, b) => b.actual - a.actual);
+    }, [transactions]);
+
+    // --- OpCore Intelligence Logic ---
+    const burnRate = totalExpense > 0 ? totalExpense : (lastMonthExpense > 0 ? lastMonthExpense : 1);
+    const runwayMonths = endBalance > 0 ? (endBalance / burnRate).toFixed(1) : '0.0';
+
+    // Find biggest spender spike
+    const spikeCategory = expenseCategories.find(c => c.diff > 0);
+    const spikeInsight = spikeCategory
+        ? `${spikeCategory.name} up ${((spikeCategory.diff / (spikeCategory.planned || 1)) * 100).toFixed(0)}%`
+        : "Stable spending patterns";
+
+    // Donut Chart Logic (CSS Conic Gradient)
+    const donutGradient = useMemo(() => {
+        if (totalExpense === 0) return 'conic-gradient(#f3f4f6 0% 100%)';
+
+        let currentDeg = 0;
+        const colors = ['#3b82f6', '#ef4444', '#f59e0b', '#10b981', '#6366f1', '#8b5cf6']; // Blue, Red, Orange, Green, Indigo, Purple
+
+        const segments = expenseCategories.slice(0, 5).map((cat, i) => {
+            const percent = (cat.actual / totalExpense) * 100;
+            const deg = (percent / 100) * 360;
+            const start = currentDeg;
+            const end = currentDeg + deg;
+            currentDeg = end;
+            return `${colors[i % colors.length]} ${start}deg ${end}deg`;
+        });
+
+        return `conic-gradient(${segments.join(', ')}, #f3f4f6 ${currentDeg}deg 360deg)`;
+    }, [expenseCategories, totalExpense]);
+
+    const handlePrint = () => {
+        window.print();
+    };
+
+    if (isLocked) {
         return (
-            <div className="h-full flex flex-col items-center justify-center p-8 text-center animate-fade-in">
-                <div className="bg-gray-100 dark:bg-gray-800 p-8 rounded-full mb-6">
-                    <Lock size={64} className="text-gray-400" />
+            <div className="flex flex-col items-center justify-center p-8 h-[60vh] text-center">
+                <div className="bg-blue-50 p-6 rounded-full mb-6 relative">
+                    <PiggyBank size={48} className="text-blue-500" />
+                    <div className="absolute top-0 right-0 p-1 bg-red-500 rounded-full border-2 border-white"></div>
                 </div>
-                <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-4">Pro Analytics Locked</h2>
-                <p className="max-w-md text-gray-600 dark:text-gray-400 mb-8">
-                    Upgrade to the Pro Plan to access advanced budgeting, financial forecasting, and planned vs. actual reports.
-                </p>
+                <h2 className="text-2xl font-bold mb-2">Financial Insights Locked</h2>
+                <p className="text-gray-500 max-w-md mb-8">Upgrade to Business Pro to see your monthly budget performance and savings analysis.</p>
+                <button className="px-8 py-3 bg-blue-600 text-white font-bold rounded-xl shadow-lg hover:bg-blue-700 transition-colors">
+                    Upgrade to Pro
+                </button>
             </div>
         );
     }
 
-    // Calculate Aggregates
-    const totalIncome = transactions.filter(t => t.type === 'income').reduce((sum, t) => sum + t.amount, 0);
-    const totalExpenses = transactions.filter(t => t.type === 'expense').reduce((sum, t) => sum + t.amount, 0);
-
-    const startBalance = 1000000; // Mock starting balance
-    const endBalance = startBalance + totalIncome - totalExpenses;
-
-    // Budget Calculations
-    const expenseBudgets = budgets.filter(b => b.type === 'expense');
-    const incomeBudgets = budgets.filter(b => b.type === 'income');
-
-    const getActualForCategory = (catName: string, type: 'income' | 'expense') => {
-        return transactions
-            .filter(t => t.type === type && (t.categoryName.includes(catName) || t.description.includes(catName)))
-            .reduce((sum, t) => sum + t.amount, 0);
-    };
+    const currentDate = new Date().toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
 
     return (
-        <div className="max-w-7xl mx-auto space-y-8 animate-fade-in pb-10">
-
-            {/* Header Section */}
-            <div className="flex flex-col md:flex-row justify-between items-start md:items-center">
+        <div className="p-4 md:p-8 max-w-[1600px] mx-auto pb-20 animate-fade-in">
+            {/* Header */}
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-end mb-8 gap-4 print:hidden">
                 <div>
-                    <h1 className="text-3xl font-bold text-gray-900 dark:text-white flex items-center gap-3">
-                        <span className="text-brand">Financial</span> Monthly Budget
+                    <h1 className="text-3xl md:text-4xl font-bold text-gray-900 dark:text-white">
+                        <span className="text-blue-600">Financial</span> Monthly Budget
                     </h1>
-                    <p className="text-gray-500 font-medium mt-1">{new Date().toLocaleString('default', { month: 'long', year: 'numeric' })}</p>
+                    <p className="text-gray-500 font-medium text-lg mt-1">{currentDate}</p>
                 </div>
-                <div className="text-right">
-                    <p className="text-sm text-gray-500">Starting balance</p>
-                    <p className="text-xl font-bold text-gray-700 dark:text-gray-200">{tenant.currencySymbol}{startBalance.toLocaleString()}</p>
-                </div>
-            </div>
-
-            {/* Top Cards: Balance & Summary */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-
-                {/* Balance Chart (Start vs End) */}
-                <div className="bg-white dark:bg-gray-800 p-8 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700">
-                    <div className="flex justify-center items-end gap-16 h-[200px] w-full mt-4">
-                        {/* Start Balance */}
-                        <div className="flex flex-col items-center gap-3 w-32 group">
-                            <div className="w-full bg-[#2d3748] dark:bg-slate-600 rounded-t-sm relative transition-all duration-700 ease-out hover:opacity-90" style={{ height: '140px' }}>
-                                {/* Tooltip */}
-                                <div className="absolute -top-10 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity bg-black text-white text-xs py-1 px-2 rounded whitespace-nowrap z-10">
-                                    {tenant.currencySymbol}{startBalance.toLocaleString()}
-                                </div>
-                            </div>
-                            <div className="text-center">
-                                <p className="text-xs font-bold text-gray-800 dark:text-gray-200 uppercase tracking-wide">START BALANCE</p>
-                                <p className="text-[10px] text-gray-500">{tenant.currencySymbol}{startBalance.toLocaleString()}</p>
-                            </div>
-                        </div>
-
-                        {/* End Balance */}
-                        <div className="flex flex-col items-center gap-3 w-32 group">
-                            <div
-                                className="w-full bg-[#f97316] rounded-t-sm relative transition-all duration-700 ease-out hover:opacity-90"
-                                style={{ height: `${Math.min(180, Math.max(20, (endBalance / startBalance) * 140))}px` }}
-                            >
-                                {/* Tooltip */}
-                                <div className="absolute -top-10 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity bg-black text-white text-xs py-1 px-2 rounded whitespace-nowrap z-10">
-                                    {tenant.currencySymbol}{endBalance.toLocaleString()}
-                                </div>
-                            </div>
-                            <div className="text-center">
-                                <p className="text-xs font-bold text-[#f97316] uppercase tracking-wide">END BALANCE</p>
-                                <p className="text-[10px] text-[#f97316]">{tenant.currencySymbol}{endBalance.toLocaleString()}</p>
-                            </div>
-                        </div>
+                <div className="text-right hidden md:block group cursor-pointer" onClick={handlePrint}>
+                    <div className="flex items-center gap-2 text-gray-400 group-hover:text-blue-600 transition-colors mb-1 justify-end">
+                        <Printer size={14} />
+                        <span className="text-xs font-bold uppercase tracking-widest">EXPORT REPORT</span>
                     </div>
-                </div>
-
-                {/* KPI Card: Savings */}
-                <div className="bg-gray-50 dark:bg-gray-700/30 p-8 rounded-xl flex flex-col justify-center items-center text-center border border-gray-100 dark:border-gray-700 shadow-sm relative overflow-hidden">
-                    {/* Decorative background visual */}
-                    <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-gray-300 to-transparent opacity-20"></div>
-
-                    <h3 className="text-6xl font-light text-gray-400 mb-2 font-mono tracking-tighter">
-                        {totalIncome > totalExpenses ? '+' : ''}{totalExpenses > 0 ? Math.round(((totalIncome - totalExpenses) / totalExpenses) * 100) : 0}%
-                    </h3>
-                    <p className="text-sm text-gray-500 italic mb-8">Increase in total savings</p>
-
-                    <div className="w-4/5 border-t border-dashed border-gray-300 dark:border-gray-600 mb-8"></div>
-
-                    <h2 className="text-4xl font-bold text-gray-900 dark:text-white mb-2">
-                        {tenant.currencySymbol}{(totalIncome - totalExpenses).toLocaleString()}
+                    <h2 className="text-3xl font-bold text-gray-900 dark:text-white group-hover:scale-105 transition-transform origin-right">
+                        {tenant.currencySymbol}{startingBalance.toLocaleString()}
                     </h2>
-                    <p className="text-sm text-gray-500 uppercase tracking-widest text-[10px]">Saved this month</p>
                 </div>
             </div>
 
-            {/* Horizontal Bars: Income & Expenses */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-12">
-                {/* Expenses Bar */}
+            {/* OpCore Intelligence Card */}
+            <div className="bg-gradient-to-r from-blue-900 to-indigo-900 rounded-[2rem] p-8 text-white shadow-xl mb-12 relative overflow-hidden print:bg-white print:text-black print:border print:border-black">
+                <div className="absolute top-0 right-0 p-12 opacity-10">
+                    <Brain size={200} />
+                </div>
+
+                <div className="relative z-10">
+                    <div className="flex items-center gap-3 mb-6">
+                        <div className="p-2 bg-white/10 rounded-lg backdrop-blur-sm">
+                            <Brain className="text-blue-300" size={24} />
+                        </div>
+                        <h3 className="font-bold text-lg tracking-wide uppercase text-blue-200">OpCore Intelligence</h3>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+                        <div>
+                            <p className="text-blue-300 text-xs font-bold uppercase mb-1">Estimated Runway</p>
+                            <div className="text-4xl font-bold mb-1">{runwayMonths} <span className="text-lg font-medium text-blue-300">Months</span></div>
+                            <p className="text-blue-200/60 text-xs">Based on current burn rate of {tenant.currencySymbol}{burnRate.toLocaleString()}/mo</p>
+                        </div>
+
+                        <div>
+                            <p className="text-blue-300 text-xs font-bold uppercase mb-1">Spend Alert</p>
+                            <div className="text-2xl font-bold mb-1 line-clamp-1">{spikeInsight}</div>
+                            <p className="text-blue-200/60 text-xs">Highest value jump vs last month</p>
+                        </div>
+
+                        <div>
+                            <p className="text-blue-300 text-xs font-bold uppercase mb-1">Efficiency Score</p>
+                            <div className="flex items-center gap-2">
+                                <div className="text-4xl font-bold">{savingsRate > 20 ? 'A+' : (savingsRate > 0 ? 'B' : 'Needs Work')}</div>
+                                <div className={`px-2 py-1 rounded text-xs font-bold ${savingsRate > 0 ? 'bg-green-500/20 text-green-300' : 'bg-red-500/20 text-red-300'}`}>
+                                    {savingsRate.toFixed(0)}% Savings
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            {/* Visual Cards Row */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-16">
+
+                {/* Balance Visualization */}
+                <div className="bg-white dark:bg-gray-800 rounded-[2rem] p-10 shadow-sm border border-gray-100 dark:border-gray-700 flex flex-col justify-center items-center min-h-[300px]">
+                    <div className="flex items-end gap-12 h-40">
+                        {/* Start Bar */}
+                        <div className="flex flex-col items-center gap-3">
+                            <div className="w-24 bg-slate-700 dark:bg-slate-600 rounded-t-lg shadow-xl" style={{ height: '100px' }}></div>
+                            <div className="text-center">
+                                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">START BALANCE</p>
+                                <p className="font-bold text-slate-700 dark:text-slate-300 text-sm">{tenant.currencySymbol}{startingBalance.toLocaleString()}</p>
+                            </div>
+                        </div>
+
+                        {/* End Bar */}
+                        <div className="flex flex-col items-center gap-3">
+                            <div
+                                className={`w-24 rounded-t-lg shadow-xl transition-all duration-700 ${endBalance >= startingBalance ? 'bg-blue-500' : 'bg-red-400'}`}
+                                style={{ height: `${Math.max(40, Math.min(160, (endBalance / (startingBalance || 1)) * 100))}px` }}
+                            ></div>
+                            <div className="text-center">
+                                <p className={`text-[10px] font-bold uppercase tracking-wider mb-1 ${endBalance >= startingBalance ? 'text-blue-500' : 'text-red-400'}`}>END BALANCE</p>
+                                <p className={`font-bold text-sm ${endBalance >= startingBalance ? 'text-blue-600' : 'text-red-500'}`}>{tenant.currencySymbol}{endBalance.toLocaleString()}</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Savings Widget */}
+                <div className="bg-white dark:bg-gray-800 rounded-[2rem] p-10 shadow-sm border border-gray-100 dark:border-gray-700 flex items-center justify-between relative overflow-hidden">
+                    <div className="relative z-10">
+                        <h3 className="text-6xl md:text-7xl font-light text-gray-900 dark:text-white mb-2 tracking-tighter">
+                            {savingsRate.toFixed(0)}%
+                        </h3>
+                        <p className="text-gray-400 italic font-medium">
+                            {savings > 0 ? 'Increase in total savings' : 'Decrease in savings'}
+                        </p>
+
+                        <div className="mt-8">
+                            <h4 className="text-4xl font-bold text-gray-900 dark:text-white mb-1">
+                                {tenant.currencySymbol}{Math.abs(savings).toLocaleString()}
+                            </h4>
+                            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">SAVED THIS MONTH</p>
+                        </div>
+                    </div>
+
+                    <div className="relative z-10 opacity-10 md:opacity-100">
+                        <PiggyBank size={180} className="text-gray-100 dark:text-gray-700 stroke-[1.5]" />
+                    </div>
+                </div>
+            </div>
+
+            {/* Progress Bars */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-12 mb-16">
                 <div>
-                    <h3 className="text-lg font-bold text-[#f97316] mb-6">Expenses</h3>
-                    <div className="space-y-4">
-                        {/* Planned Row */}
-                        <div className="grid grid-cols-[60px_1fr] gap-4 items-center">
-                            <span className="text-xs font-medium text-gray-500">Planned</span>
-                            <div className="flex items-center gap-3 w-full">
-                                <span className="text-xs font-mono w-20 text-right">{tenant.currencySymbol}{(expenseBudgets.reduce((sum, b) => sum + b.plannedAmount, 0)).toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
-                                <div className="h-4 bg-[#3b0a1e] rounded-sm w-full shadow-sm"></div>
+                    <h3 className="text-orange-500 font-bold mb-4 flex items-center gap-2">Expenses</h3>
+                    <div className="space-y-6">
+                        <div>
+                            <div className="flex justify-between text-xs font-bold text-gray-400 uppercase mb-2">
+                                <span>Last Month</span>
+                                <span>{tenant.currencySymbol}{lastMonthExpense.toLocaleString()}</span>
+                            </div>
+                            <div className="h-3 w-full bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
+                                <div className="h-full bg-slate-800 dark:bg-slate-500 rounded-full w-full"></div>
                             </div>
                         </div>
-                        {/* Actual Row */}
-                        <div className="grid grid-cols-[60px_1fr] gap-4 items-center">
-                            <span className="text-xs font-medium text-gray-500">Actual</span>
-                            <div className="flex items-center gap-3 w-full">
-                                <span className="text-xs font-mono w-20 text-right">{tenant.currencySymbol}{totalExpenses.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
-                                <div
-                                    className="h-4 bg-gray-400 rounded-sm shadow-sm transition-all duration-1000"
-                                    style={{ width: `${Math.min(100, (totalExpenses / (expenseBudgets.reduce((sum, b) => sum + b.plannedAmount, 1) || 1)) * 100)}%` }}
-                                ></div>
+                        <div>
+                            <div className="flex justify-between text-xs font-bold text-gray-400 uppercase mb-2">
+                                <span>This Month</span>
+                                <span>{tenant.currencySymbol}{totalExpense.toLocaleString()}</span>
+                            </div>
+                            <div className="h-3 w-full bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
+                                <div className="h-full bg-gray-200 dark:bg-gray-600 rounded-full" style={{ width: `${lastMonthExpense > 0 ? Math.min((totalExpense / lastMonthExpense) * 100, 100) : 0}%` }}></div>
                             </div>
                         </div>
                     </div>
                 </div>
 
-                {/* Income Bar */}
                 <div>
-                    <h3 className="text-lg font-bold text-[#f97316] mb-6">Income</h3>
-                    <div className="space-y-4">
-                        {/* Planned Row */}
-                        <div className="grid grid-cols-[60px_1fr] gap-4 items-center">
-                            <span className="text-xs font-medium text-gray-500">Planned</span>
-                            <div className="flex items-center gap-3 w-full">
-                                <span className="text-xs font-mono w-20 text-right">{tenant.currencySymbol}{(incomeBudgets.reduce((sum, b) => sum + b.plannedAmount, 0)).toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
-                                <div className="h-4 bg-[#3b0a1e] rounded-sm w-full shadow-sm"></div>
+                    <h3 className="text-blue-500 font-bold mb-4 flex items-center gap-2">Income</h3>
+                    <div className="space-y-6">
+                        <div>
+                            <div className="flex justify-between text-xs font-bold text-gray-400 uppercase mb-2">
+                                <span>Last Month</span>
+                                <span>{tenant.currencySymbol}{lastMonthIncome.toLocaleString()}</span>
+                            </div>
+                            <div className="h-3 w-full bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
+                                <div className="h-full bg-slate-800 dark:bg-slate-500 rounded-full w-full"></div>
                             </div>
                         </div>
-                        {/* Actual Row */}
-                        <div className="grid grid-cols-[60px_1fr] gap-4 items-center">
-                            <span className="text-xs font-medium text-gray-500">Actual</span>
-                            <div className="flex items-center gap-3 w-full">
-                                <span className="text-xs font-mono w-20 text-right">{tenant.currencySymbol}{totalIncome.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
-                                <div
-                                    className="h-4 bg-green-500 rounded-sm shadow-sm transition-all duration-1000"
-                                    style={{ width: `${Math.min(100, (totalIncome / (incomeBudgets.reduce((sum, b) => sum + b.plannedAmount, 1) || 1)) * 100)}%` }}
-                                ></div>
+                        <div>
+                            <div className="flex justify-between text-xs font-bold text-gray-400 uppercase mb-2">
+                                <span>This Month</span>
+                                <span>{tenant.currencySymbol}{totalIncome.toLocaleString()}</span>
+                            </div>
+                            <div className="h-3 w-full bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
+                                <div className="h-full bg-gray-200 dark:bg-gray-600 rounded-full" style={{ width: `${lastMonthIncome > 0 ? Math.min((totalIncome / lastMonthIncome) * 100, 100) : 0}%` }}></div>
                             </div>
                         </div>
                     </div>
                 </div>
             </div>
 
-            {/* Detailed Annual Tables */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mt-8">
-
-                {/* Annual Expenses Table */}
-                <div className="bg-white dark:bg-gray-800 rounded-none border border-gray-100 dark:border-gray-700 shadow-sm overflow-hidden">
-                    <div className="p-5 border-b border-gray-100 dark:border-gray-700 bg-orange-50/10">
-                        <h3 className="text-brand font-bold text-lg">Annual Expenses</h3>
+            {/* Breakdown Tables */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                {/* Expenses Table with Donut */}
+                <div className="bg-white dark:bg-gray-800 p-8 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700">
+                    <div className="flex items-center justify-between mb-6">
+                        <h3 className="text-orange-500 font-bold flex items-center gap-2">
+                            <PieChart size={18} />
+                            Expense Composition
+                        </h3>
                     </div>
-                    <table className="w-full text-sm">
-                        <thead className="bg-[#fffbf7] dark:bg-gray-700 text-gray-600 dark:text-gray-300 border-b-2 border-orange-200">
-                            <tr>
-                                <th className="text-left py-3 px-5 font-bold text-gray-700 dark:text-gray-200">Totals</th>
-                                <th className="text-right py-3 px-5 font-bold text-gray-700 dark:text-gray-200">Planned</th>
-                                <th className="text-right py-3 px-5 font-bold text-gray-700 dark:text-gray-200">Actual</th>
-                                <th className="text-right py-3 px-5 font-bold text-gray-700 dark:text-gray-200">Diff.</th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-50 dark:divide-gray-700">
-                            {expenseBudgets.map((budget, idx) => {
-                                const actual = getActualForCategory(budget.categoryName, 'expense');
-                                const diff = budget.plannedAmount - actual;
-                                return (
-                                    <tr key={idx} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
-                                        <td className="py-2 px-5 text-gray-800 dark:text-gray-200 font-medium bg-orange-50/20 dark:bg-transparent">
-                                            {budget.categoryName}
-                                        </td>
-                                        <td className="py-2 px-5 text-right text-gray-500 font-mono text-xs">
-                                            {tenant.currencySymbol}{budget.plannedAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                                        </td>
-                                        <td className="py-2 px-5 text-right text-gray-900 dark:text-gray-100 font-mono font-bold text-xs">
-                                            {tenant.currencySymbol}{actual.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                                        </td>
-                                        <td className={`py-2 px-5 text-right font-mono text-xs font-bold ${diff < 0 ? 'text-red-500' : 'text-gray-400'}`}>
-                                            {tenant.currencySymbol}{diff.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                                        </td>
-                                    </tr>
-                                );
-                            })}
-                        </tbody>
-                    </table>
+
+                    <div className="flex flex-col md:flex-row items-center gap-8">
+                        {/* Donut Chart */}
+                        <div className="relative w-48 h-48 flex-shrink-0">
+                            <div
+                                className="w-full h-full rounded-full"
+                                style={{ background: donutGradient }}
+                            ></div>
+                            <div className="absolute inset-4 bg-white dark:bg-gray-800 rounded-full flex flex-col items-center justify-center">
+                                <span className="text-xs text-gray-400 uppercase font-bold">Total</span>
+                                <span className="text-lg font-bold text-gray-900 dark:text-white">{tenant.currencySymbol}{(totalExpense / 1000).toFixed(1)}k</span>
+                            </div>
+                        </div>
+
+                        {/* List */}
+                        <div className="flex-1 w-full overflow-x-auto">
+                            <table className="w-full text-sm">
+                                <tbody className="divide-y divide-gray-50 dark:divide-gray-700/50">
+                                    {expenseCategories.slice(0, 5).map((cat, i) => (
+                                        <tr key={i}>
+                                            <td className="py-3 text-gray-600 dark:text-gray-300 flex items-center gap-2">
+                                                <div className={`w-2 h-2 rounded-full`} style={{ backgroundColor: ['#3b82f6', '#ef4444', '#f59e0b', '#10b981', '#6366f1'][i % 5] }}></div>
+                                                {cat.name}
+                                            </td>
+                                            <td className="py-3 text-right font-bold text-gray-900 dark:text-white">{cat.actual.toLocaleString()}</td>
+                                            <td className={`py-3 text-right font-mono text-xs ${cat.diff > 0 ? 'text-red-500' : 'text-green-500'}`}>
+                                                {cat.diff > 0 ? '+' : ''}{(cat.diff / 1000).toFixed(0)}k
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                            {expenseCategories.length > 5 && (
+                                <p className="text-xs text-center text-gray-400 mt-4 italic">+ {expenseCategories.length - 5} other categories</p>
+                            )}
+                        </div>
+                    </div>
                 </div>
 
-                {/* Annual Income Table */}
-                <div className="bg-white dark:bg-gray-800 rounded-none border border-gray-100 dark:border-gray-700 shadow-sm overflow-hidden">
-                    <div className="p-5 border-b border-gray-100 dark:border-gray-700 bg-orange-50/10 flex justify-between items-center">
-                        <h3 className="text-brand font-bold text-lg">Annual Income</h3>
-                        <span className="text-[10px] text-gray-400 uppercase tracking-widest">{new Date().toLocaleString()}</span>
-                    </div>
-                    <table className="w-full text-sm">
-                        <thead className="bg-[#fffbf7] dark:bg-gray-700 text-gray-600 dark:text-gray-300 border-b-2 border-orange-200">
-                            <tr>
-                                <th className="text-left py-3 px-5 font-bold text-gray-700 dark:text-gray-200">Totals</th>
-                                <th className="text-right py-3 px-5 font-bold text-gray-700 dark:text-gray-200">Planned</th>
-                                <th className="text-right py-3 px-5 font-bold text-gray-700 dark:text-gray-200">Actual</th>
-                                <th className="text-right py-3 px-5 font-bold text-gray-700 dark:text-gray-200">Diff.</th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-50 dark:divide-gray-700">
-                            {incomeBudgets.map((budget, idx) => {
-                                const actual = getActualForCategory(budget.categoryName, 'income');
-                                const diff = actual - budget.plannedAmount;
-                                return (
-                                    <tr key={idx} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
-                                        <td className="py-2 px-5 text-gray-800 dark:text-gray-200 font-medium bg-orange-50/20 dark:bg-transparent">
-                                            {budget.categoryName}
-                                        </td>
-                                        <td className="py-2 px-5 text-right text-gray-500 font-mono text-xs">
-                                            {tenant.currencySymbol}{budget.plannedAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                                        </td>
-                                        <td className="py-2 px-5 text-right text-gray-900 dark:text-gray-100 font-mono font-bold text-xs">
-                                            {tenant.currencySymbol}{actual.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                                        </td>
-                                        <td className={`py-2 px-5 text-right font-mono text-xs font-bold ${diff < 0 ? 'text-red-500' : 'text-green-500'}`}>
-                                            {tenant.currencySymbol}{diff.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                {/* Income Table */}
+                <div className="bg-white dark:bg-gray-800 p-8 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700">
+                    <h3 className="text-blue-500 font-bold mb-6">Monthly Income Breakdown</h3>
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                            <thead>
+                                <tr className="border-b border-gray-100 dark:border-gray-700">
+                                    <th className="text-left py-3 font-semibold text-gray-900 dark:text-white">Source</th>
+                                    <th className="text-right py-3 font-medium text-gray-500">Last Month</th>
+                                    <th className="text-right py-3 font-bold text-gray-900 dark:text-white">This Month</th>
+                                    <th className="text-right py-3 font-medium text-green-400">Diff.</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-50 dark:divide-gray-700/50">
+                                {incomeCategories.length > 0 ? incomeCategories.map((cat, i) => (
+                                    <tr key={i}>
+                                        <td className="py-4 text-gray-600 dark:text-gray-300">{cat.name}</td>
+                                        <td className="py-4 text-right text-gray-400">{cat.planned.toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>
+                                        <td className="py-4 text-right font-bold text-gray-900 dark:text-white">{cat.actual.toLocaleString()}</td>
+                                        <td className={`py-4 text-right font-mono text-xs ${cat.diff >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                                            {cat.diff > 0 ? '+' : ''}{cat.diff.toLocaleString(undefined, { maximumFractionDigits: 0 })}
                                         </td>
                                     </tr>
-                                );
-                            })}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-
-            {/* Detailed Monthly Tables */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mt-4">
-
-                {/* Monthly Income Table */}
-                <div className="bg-white dark:bg-gray-800 rounded-none border border-gray-100 dark:border-gray-700 shadow-sm overflow-hidden">
-                    <div className="p-5 border-b border-gray-100 dark:border-gray-700 bg-orange-50/10 flex justify-between items-center">
-                        <h3 className="text-brand font-bold text-lg">Monthly Income</h3>
-                        <span className="text-[10px] text-gray-400 uppercase tracking-widest">{new Date().toLocaleString()}</span>
-                    </div>
-                    <table className="w-full text-sm">
-                        <thead className="bg-[#fffbf7] dark:bg-gray-700 text-gray-600 dark:text-gray-300 border-b-2 border-orange-200">
-                            <tr>
-                                <th className="text-left py-3 px-5 font-bold text-gray-700 dark:text-gray-200">Totals</th>
-                                <th className="text-right py-3 px-5 font-bold text-gray-700 dark:text-gray-200">Planned</th>
-                                <th className="text-right py-3 px-5 font-bold text-gray-700 dark:text-gray-200">Actual</th>
-                                <th className="text-right py-3 px-5 font-bold text-gray-700 dark:text-gray-200">Diff.</th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-50 dark:divide-gray-700">
-                            {incomeBudgets.map((budget, idx) => {
-                                const actual = getActualForCategory(budget.categoryName, 'income'); // In this demo, Assuming Seed Data = This Month
-                                const planned = budget.plannedAmount / 12; // Simple monthly division
-                                const diff = actual - planned;
-                                return (
-                                    <tr key={idx} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
-                                        <td className="py-2 px-5 text-gray-800 dark:text-gray-200 font-medium bg-orange-50/20 dark:bg-transparent">
-                                            {budget.categoryName}
-                                        </td>
-                                        <td className="py-2 px-5 text-right text-gray-500 font-mono text-xs">
-                                            {tenant.currencySymbol}{planned.toLocaleString(undefined, { minimumFractionDigits: 1 })}
-                                        </td>
-                                        <td className="py-2 px-5 text-right text-gray-900 dark:text-gray-100 font-mono font-bold text-xs">
-                                            {tenant.currencySymbol}{actual.toLocaleString(undefined, { minimumFractionDigits: 1 })}
-                                        </td>
-                                        <td className={`py-2 px-5 text-right font-mono text-xs font-bold ${diff < 0 ? 'text-red-500' : 'text-green-500'}`}>
-                                            {tenant.currencySymbol}{diff.toLocaleString(undefined, { minimumFractionDigits: 1 })}
-                                        </td>
+                                )) : (
+                                    <tr>
+                                        <td colSpan={4} className="py-8 text-center text-gray-400 italic">No income data recorded yet.</td>
                                     </tr>
-                                );
-                            })}
-                        </tbody>
-                    </table>
-                </div>
-
-                {/* Monthly Expenses Table */}
-                <div className="bg-white dark:bg-gray-800 rounded-none border border-gray-100 dark:border-gray-700 shadow-sm overflow-hidden">
-                    <div className="p-5 border-b border-gray-100 dark:border-gray-700 bg-orange-50/10">
-                        <h3 className="text-brand font-bold text-lg">Monthly Expenses</h3>
+                                )}
+                            </tbody>
+                        </table>
                     </div>
-                    <table className="w-full text-sm">
-                        <thead className="bg-[#fffbf7] dark:bg-gray-700 text-gray-600 dark:text-gray-300 border-b-2 border-orange-200">
-                            <tr>
-                                <th className="text-left py-3 px-5 font-bold text-gray-700 dark:text-gray-200">Totals</th>
-                                <th className="text-right py-3 px-5 font-bold text-gray-700 dark:text-gray-200">Planned</th>
-                                <th className="text-right py-3 px-5 font-bold text-gray-700 dark:text-gray-200">Actual</th>
-                                <th className="text-right py-3 px-5 font-bold text-gray-700 dark:text-gray-200">Diff.</th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-50 dark:divide-gray-700">
-                            {expenseBudgets.map((budget, idx) => {
-                                const actual = getActualForCategory(budget.categoryName, 'expense'); // In this demo, Assuming Seed Data = This Month
-                                const planned = budget.plannedAmount / 12; // Simple monthly division
-                                const diff = planned - actual;
-                                return (
-                                    <tr key={idx} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
-                                        <td className="py-2 px-5 text-gray-800 dark:text-gray-200 font-medium bg-orange-50/20 dark:bg-transparent">
-                                            {budget.categoryName}
-                                        </td>
-                                        <td className="py-2 px-5 text-right text-gray-500 font-mono text-xs">
-                                            {tenant.currencySymbol}{planned.toLocaleString(undefined, { minimumFractionDigits: 1 })}
-                                        </td>
-                                        <td className="py-2 px-5 text-right text-gray-900 dark:text-gray-100 font-mono font-bold text-xs">
-                                            {tenant.currencySymbol}{actual.toLocaleString(undefined, { minimumFractionDigits: 1 })}
-                                        </td>
-                                        <td className={`py-2 px-5 text-right font-mono text-xs font-bold ${diff < 0 ? 'text-red-500' : 'text-gray-400'}`}>
-                                            {tenant.currencySymbol}{diff.toLocaleString(undefined, { minimumFractionDigits: 1 })}
-                                        </td>
-                                    </tr>
-                                );
-                            })}
-                        </tbody>
-                    </table>
                 </div>
             </div>
         </div>

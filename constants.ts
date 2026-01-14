@@ -2,21 +2,26 @@
 import { TaxRule, Tenant, Transaction, Budget } from './types';
 
 export const INITIAL_TENANT: Tenant = {
-  id: 'tenant-ng-001',
-  businessName: 'Lagos Ventures Ltd',
+  id: '',
+  businessName: '',
   countryCode: 'NG',
   currencySymbol: '₦',
-  brandColor: '#ea580c', // Orange from screenshot
+  brandColor: '#2252c9',
+  themeColor: '#2252c9', // Default Theme
   logoUrl: null,
-  subscriptionTier: 'pro',
+  subscriptionTier: 'free',
   turnoverBand: 'micro',
-  tinNumber: '234-567-890',
-  taxIdentityNumber: 'RC-1234567890123', // Placeholder for Unified Tax ID
+  tinNumber: '',
+  taxIdentityNumber: '',
   sector: 'services',
-  accountType: 'business', // Added to satisfy Tenant interface
-  businessStructure: 'limited', // Default mock structure
+  accountType: 'personal',
+  businessStructure: 'sole_prop',
   rentReceiptUploaded: false,
-  rentReceiptUrl: null
+  rentReceiptUrl: null,
+  stampUrl: null,
+  invoiceTemplate: 'modern',
+  invoiceFont: 'inter',
+  showWatermark: false
 };
 
 export const MOCK_TAX_RULES: TaxRule[] = [
@@ -106,3 +111,14 @@ export const MOCK_BUDGETS: Budget[] = [
   { categoryId: 'exp_20', categoryName: 'Vehicle cost', plannedAmount: 0, type: 'expense' },
   { categoryId: 'exp_21', categoryName: 'Website expenses', plannedAmount: 0, type: 'expense' },
 ];
+
+// API Configuration
+// Use window.location.hostname to allow mobile testing on LAN
+const getApiBaseUrl = () => {
+  if (typeof window !== 'undefined') {
+    return `http://${window.location.hostname}:3001`;
+  }
+  return 'http://localhost:3001';
+};
+
+export const API_BASE_URL = getApiBaseUrl();

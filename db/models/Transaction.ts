@@ -13,9 +13,25 @@ export default class Transaction extends Model {
     @text('category_name') categoryName!: string
     @text('description') description!: string
     @text('payee') payee!: string
+    @text('vendor_tin') vendorTin!: string // [NEW]
     @text('payment_method') paymentMethod!: string
     @text('ref_id') refId!: string
-    @text('receipt_image_url') receiptImageUrl!: string
+    @text('receipt_urls') _receiptUrls!: string
+    @field('vat_amount') vatAmount!: number
+
+    get receiptUrls(): string[] {
+        try {
+            return JSON.parse(this._receiptUrls || '[]');
+        } catch {
+            return [];
+        }
+    }
+
+    set receiptUrls(urls: string[]) {
+        this._receiptUrls = JSON.stringify(urls);
+    }
+
+    @field('serial_id') serialId!: number
 
     // Compliance
     @field('is_deductible') _isDeductible!: boolean
@@ -26,6 +42,7 @@ export default class Transaction extends Model {
     @text('deduction_tip') deductionTip!: string
     @field('is_capital_asset') isCapitalAsset!: boolean
     @text('asset_class') assetClass!: AssetClass
+    @text('invoice_id') invoiceId!: string
 
     @text('sync_status') appSyncStatus!: 'synced' | 'pending'
     @readonly @date('created_at') createdAt!: Date
@@ -38,5 +55,9 @@ export default class Transaction extends Model {
             return false;
         }
         return this._isDeductible;
+    }
+
+    set isDeductible(value: boolean) {
+        this._isDeductible = value;
     }
 }

@@ -1,12 +1,15 @@
 import React, { useEffect, useState } from 'react';
 import { Loader2, CheckCircle, Clock } from 'lucide-react';
 import { useTenant } from '../context/TenantContext';
+import { ReceiptScanner as ReceiptScannerUtil, ScannedReceipt } from '../utils/ReceiptScanner';
 
 interface QueueItem {
     id: string;
+    fileUri: string; // Changed from fileName for utility
     fileName: string;
     status: 'pending' | 'processing' | 'ready' | 'error';
     progress: number;
+    data?: Partial<ScannedReceipt>;
 }
 
 // Global simulation of a queue (In real app, use Context or Redux)
@@ -18,8 +21,11 @@ const notifyListeners = () => listeners.forEach(l => l());
 export const addToQueue = (files: File[]) => {
     files.forEach(file => {
         const id = Math.random().toString(36).substr(2, 9);
+        const fileUri = URL.createObjectURL(file); // Create blob URL for processing
+
         processingQueue.push({
             id,
+            fileUri,
             fileName: file.name,
             status: 'pending',
             progress: 0
@@ -35,30 +41,60 @@ const simulateWorker = async (id: string) => {
     const item = processingQueue.find(i => i.id === id);
     if (!item) return;
 
-    // Wait for slot
-    setTimeout(() => {
-        item.status = 'processing';
-        item.progress = 10;
-        notifyListeners();
+    // 1. Wait for slot
+    item.status = 'processing';
+    notifyListeners();
 
-        // Simulate Tesseract Steps
-        let p = 10;
-        const interval = setInterval(() => {
-            p += 15;
-            item.progress = p;
-            if (p >= 100) {
-                clearInterval(interval);
-                item.status = 'ready';
-                notifyListeners();
-            }
-            notifyListeners();
-        }, 800); // 4-5 seconds per item
-    }, 1000 * Math.random() * 2);
+    // 2. Perform Intelligent Scan (uses Demo OCR)
+    const text = await ReceiptScannerUtil.performOCR(item.fileUri);
+    const extracted = ReceiptScannerUtil.parseReceiptText(text);
+
+    // 3. Store Result
+    item.data = {
+        ...extracted,
+        date: extracted.date || new Date().toISOString().split('T')[0],
+    };
+
+    // 4. Complete
+    item.progress = 100;
+    item.status = 'ready';
+    notifyListeners();
 };
 
 const ProcessingQueue: React.FC = () => {
     const [items, setItems] = useState<QueueItem[]>(processingQueue);
-    const { tenant } = useTenant();
+    const { tenant, addTransaction } = useTenant();
+
+    const handleImportAll = async () => {
+        const readyItems = items.filter(i => i.status === 'ready');
+        if (readyItems.length === 0) return;
+
+        let importedCount = 0;
+        for (const item of readyItems) {
+            if (item.data && addTransaction) {
+                await addTransaction({
+                    id: `tx-${Date.now()}-${Math.random()}`,
+                    amount: item.data.amount || 0,
+                    date: item.data.date || new Date().toISOString(),
+                    type: item.data.type || 'expense',
+                    categoryId: 'office_updates',
+                    categoryName: 'Office Expenses',
+                    description: item.data.description || `Scanned Receipt: ${item.fileName}`,
+                    payee: item.data.vendorName || 'Unknown Vendor',
+                    receiptUrls: [item.fileUri],
+                    hasVatEvidence: item.data.hasVatEvidence,
+                    // @ts-ignore
+                    vatAmount: item.data.vatAmount || 0
+                });
+                // Remove from queue
+                const idx = processingQueue.indexOf(item);
+                if (idx > -1) processingQueue.splice(idx, 1);
+                importedCount++;
+            }
+        }
+        notifyListeners();
+        alert(`Successfully imported ${importedCount} transactions to the Ledger!`);
+    };
 
     useEffect(() => {
         const update = () => setItems([...processingQueue]);
@@ -80,8 +116,11 @@ const ProcessingQueue: React.FC = () => {
                     <Clock size={16} className="text-brand" /> Batch Processing Queue
                 </h3>
                 {readyCount > 0 && (
-                    <button className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded font-bold hover:bg-green-200 transition">
-                        Review {readyCount} Ready
+                    <button
+                        onClick={handleImportAll}
+                        className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded font-bold hover:bg-green-200 transition"
+                    >
+                        Import {readyCount} Ready
                     </button>
                 )}
             </div>
